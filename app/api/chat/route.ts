@@ -131,6 +131,9 @@ export async function POST(req: NextRequest) {
     rateLimitOrThrow(`chat_session:${sessionId}`, 30, 60_000);
 
     const { siteId, userId } = await assertSessionToken(sessionId, sessionToken);
+    // Persist the user's message first so the model always sees it in history.
+    await insertMessage({ sessionId, role: "user", content: userText });
+
     const history = userId ? await listRecentMessagesForUser(userId, 30) : await listRecentMessages(sessionId, 30);
     const model = getChatModel();
     const intimacyModel = getIntimacyModel();
@@ -167,8 +170,6 @@ export async function POST(req: NextRequest) {
     const assistantText = (chatResp.choices?.[0]?.message?.content ?? "").trim();
     const llmMs = msSince(t0);
 
-    // Write user/assistant messages to DB (isolated by sessionId; sessionId is per-user with token)
-    await insertMessage({ sessionId, role: "user", content: userText });
     if (!assistantText) return errorJson(502, "llm_empty");
     await insertMessage({ sessionId, role: "assistant", content: assistantText });
 

@@ -54,31 +54,27 @@ async function speakWithWebSpeech(text: string, voiceHint: string | null): Promi
       return [];
     }
   }
+  // Prepare voice selection BEFORE calling speak() to avoid "no sound" on some browsers.
+  const ut = new SpeechSynthesisUtterance(text);
+  ut.lang = document.documentElement.lang || "ja-JP";
+  ut.rate = 1.0;
+  ut.pitch = 1.0;
+  if (voiceHint) {
+    const voices = await getVoicesStable();
+    const v =
+      voices.find((vv) => vv.name === voiceHint) ??
+      voices.find((vv) => vv.lang === voiceHint) ??
+      voices.find((vv) => vv.name.includes(voiceHint) || vv.lang.includes(voiceHint));
+    if (v) {
+      ut.voice = v;
+      ut.lang = v.lang || ut.lang;
+    } else {
+      if (/^[a-z]{2}(-[A-Z]{2})?$/.test(voiceHint)) ut.lang = voiceHint;
+    }
+  }
+
   return await new Promise((resolve) => {
     const t0 = performance.now();
-    const ut = new SpeechSynthesisUtterance(text);
-    ut.lang = document.documentElement.lang || "ja-JP";
-    ut.rate = 1.0;
-    ut.pitch = 1.0;
-    if (voiceHint) {
-      try {
-        // Note: getVoices() may return empty on first call in some browsers; wait briefly.
-        void (async () => {
-          const voices = await getVoicesStable();
-          const v =
-            voices.find((vv) => vv.name === voiceHint) ??
-            voices.find((vv) => vv.lang === voiceHint) ??
-            voices.find((vv) => vv.name.includes(voiceHint) || vv.lang.includes(voiceHint));
-          if (v) {
-            ut.voice = v;
-            ut.lang = v.lang || ut.lang;
-          } else {
-            // If hint looks like a BCP-47 lang tag, apply it at least.
-            if (/^[a-z]{2}(-[A-Z]{2})?$/.test(voiceHint)) ut.lang = voiceHint;
-          }
-        })();
-      } catch {}
-    }
     ut.onend = () => resolve({ ttsMs: msSince(t0) });
     ut.onerror = () => resolve({ ttsMs: msSince(t0) });
     try {
