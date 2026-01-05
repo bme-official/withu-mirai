@@ -7,6 +7,7 @@ export type UiCallbacks = {
   onToggleOpen(open: boolean): void;
   onSelectMode(mode: "voice" | "text"): void;
   onSendText(text: string): void;
+  onTestTts(): void;
   onAcceptConsent(): void;
   onRejectConsent(): void;
 };
@@ -170,6 +171,15 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       user-select:none;
     }
     .histBtn.active { background: #111827; border-color: #111827; color: white; }
+    .ttsBtn {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 9999px;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: white;
+      cursor: pointer;
+      user-select:none;
+    }
     .tab {
       font-size: 12px;
       padding: 6px 10px;
@@ -307,10 +317,14 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   right.style.display = "flex";
   right.style.alignItems = "center";
   right.style.gap = "8px";
+  const ttsBtn = document.createElement("div");
+  ttsBtn.className = "ttsBtn";
+  ttsBtn.textContent = "🔊テスト";
   const histBtn = document.createElement("div");
   histBtn.className = "histBtn";
   histBtn.textContent = "履歴";
   right.appendChild(tabs);
+  right.appendChild(ttsBtn);
   right.appendChild(histBtn);
   right.appendChild(status);
 
@@ -430,6 +444,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     panel.classList.toggle("hideLog", !showHistory);
     // in voice mode, hide text input completely
     textRow.style.display = currentMode === "text" ? "flex" : "none";
+    ttsBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
   }
 
   function setActiveTab(mode: "voice" | "text") {
@@ -449,6 +464,9 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     historyOpen = !historyOpen;
     histBtn.classList.toggle("active", historyOpen);
     applyVisibility();
+  });
+  ttsBtn.addEventListener("click", () => {
+    cb.onTestTts();
   });
 
   sendBtn.addEventListener("click", () => {

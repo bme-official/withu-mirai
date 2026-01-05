@@ -59,6 +59,7 @@ async function speakWithWebSpeech(text: string, voiceHint: string | null): Promi
   ut.lang = document.documentElement.lang || "ja-JP";
   ut.rate = 1.0;
   ut.pitch = 1.0;
+  ut.volume = 1.0;
   if (voiceHint) {
     const voices = await getVoicesStable();
     const v =
@@ -79,6 +80,10 @@ async function speakWithWebSpeech(text: string, voiceHint: string | null): Promi
     ut.onerror = () => resolve({ ttsMs: msSince(t0) });
     try {
       window.speechSynthesis.cancel();
+      // Some browsers can be paused; resume best-effort.
+      try {
+        (window.speechSynthesis as any).resume?.();
+      } catch {}
       window.speechSynthesis.speak(ut);
     } catch {
       resolve(null);
@@ -278,6 +283,27 @@ async function main() {
           void ensureVoiceListening("mode_switch");
       }
       ensureConsentUi();
+    },
+    async onTestTts() {
+      // user-gesture triggered test; should help with browsers that block background audio
+      if (mode !== "voice") return;
+      ui.setError(null);
+      try {
+        // pause VAD during test playback
+        try {
+          vad?.stop({ stopStream: false });
+        } catch {}
+        vad = null;
+        setState("speaking");
+        const res = await speak("テストです。聞こえますか？");
+        if (!res) {
+          ui.setError("読み上げができません。ブラウザの『サイトの音声』がミュート/ブロックされていないか確認してください。");
+        }
+      } finally {
+        inFlight = false;
+        setState("idle");
+        void ensureVoiceListening("tts_test");
+      }
     },
     onAcceptConsent() {
       localStorage.setItem(STORAGE_KEYS.consent, "accepted");
