@@ -30,6 +30,30 @@ function safeErr(e: unknown): string {
 async function speakWithWebSpeech(text: string, voiceHint: string | null): Promise<{ ttsMs: number } | null> {
   if (typeof window === "undefined") return null;
   if (!("speechSynthesis" in window)) return null;
+  async function getVoicesStable(timeoutMs = 800): Promise<SpeechSynthesisVoice[]> {
+    try {
+      const v0 = window.speechSynthesis.getVoices?.() ?? [];
+      if (v0.length > 0) return v0;
+      return await new Promise((resolve) => {
+        let done = false;
+        const timer = window.setTimeout(() => {
+          if (done) return;
+          done = true;
+          resolve(window.speechSynthesis.getVoices?.() ?? []);
+        }, timeoutMs);
+        window.speechSynthesis.onvoiceschanged = () => {
+          if (done) return;
+          done = true;
+          window.clearTimeout(timer);
+          resolve(window.speechSynthesis.getVoices?.() ?? []);
+        };
+        // trigger
+        window.speechSynthesis.getVoices?.();
+      });
+    } catch {
+      return [];
+    }
+  }
   return await new Promise((resolve) => {
     const t0 = performance.now();
     const ut = new SpeechSynthesisUtterance(text);
@@ -38,13 +62,21 @@ async function speakWithWebSpeech(text: string, voiceHint: string | null): Promi
     ut.pitch = 1.0;
     if (voiceHint) {
       try {
-        // Note: getVoices() may return empty on first call in some browsers; this is best-effort.
-        const voices = window.speechSynthesis.getVoices?.() ?? [];
-        const v =
-          voices.find((vv) => vv.name === voiceHint) ??
-          voices.find((vv) => vv.lang === voiceHint) ??
-          voices.find((vv) => vv.name.includes(voiceHint) || vv.lang.includes(voiceHint));
-        if (v) ut.voice = v;
+        // Note: getVoices() may return empty on first call in some browsers; wait briefly.
+        void (async () => {
+          const voices = await getVoicesStable();
+          const v =
+            voices.find((vv) => vv.name === voiceHint) ??
+            voices.find((vv) => vv.lang === voiceHint) ??
+            voices.find((vv) => vv.name.includes(voiceHint) || vv.lang.includes(voiceHint));
+          if (v) {
+            ut.voice = v;
+            ut.lang = v.lang || ut.lang;
+          } else {
+            // If hint looks like a BCP-47 lang tag, apply it at least.
+            if (/^[a-z]{2}(-[A-Z]{2})?$/.test(voiceHint)) ut.lang = voiceHint;
+          }
+        })();
       } catch {}
     }
     ut.onend = () => resolve({ ttsMs: msSince(t0) });
@@ -77,14 +109,14 @@ async function main() {
   let inFlight = false;
   let vad: ReturnType<typeof createVad> | null = null;
   let stream: MediaStream | null = null;
+  let recorder: ReturnType<typeof createRecorder> | null = null;
   let mode: "voice" | "text" = "voice";
   let ttsVoiceHint: string | null = null;
+  let layoutMode: "bubble" | "page" = layout;
 
   function setState(next: WidgetState) {
     state = next;
     ui.setState(next);
-    ui.setStopEnabled(next === "listening");
-    ui.setStartEnabled(next === "idle" && hasConsent() && mode === "voice");
     ui.setTextFallbackEnabled(next === "idle" && mode === "text");
   }
 
@@ -94,14 +126,17 @@ async function main() {
 
   function ensureConsentUi() {
     ui.setConsentVisible(!hasConsent());
-    ui.setStartEnabled(hasConsent() && state === "idle" && mode === "voice");
   }
 
   function stopVoicePipeline() {
     try {
-      vad?.stop();
+      vad?.stop({ stopStream: true });
     } catch {}
     vad = null;
+    try {
+      recorder?.dispose();
+    } catch {}
+    recorder = null;
     try {
       stream?.getTracks().forEach((t) => t.stop());
     } catch {}
@@ -115,9 +150,13 @@ async function main() {
 
   function stopAll(phase: string, message?: string) {
     try {
-      vad?.stop();
+      vad?.stop({ stopStream: true });
     } catch {}
     vad = null;
+    try {
+      recorder?.dispose();
+    } catch {}
+    recorder = null;
     try {
       stream?.getTracks().forEach((t) => t.stop());
     } catch {}
@@ -137,11 +176,98 @@ async function main() {
     return res;
   }
 
+  async function ensureVoiceListening(reason: string) {
+    if (mode !== "voice") return;
+    if (!hasConsent()) return;
+    if (inFlight) return;
+    if (state !== "idle") return;
+
+    // ensure mic stream
+    if (!stream) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        // Don't force-switch; user may need a gesture or permission.
+        setState("idle");
+        ui.setError("マイクが利用できません。ブラウザの許可を確認し、画面をタップして再試行してください。");
+        void api.log("mic_permission", { message: safeErr(e) });
+        return;
+      }
+    }
+
+    if (!recorder) recorder = createRecorder(stream);
+    vad = createVad(stream, recorder, {
+      onSpeechStart() {
+        void api.log("vad_speech_start");
+      },
+      async onSpeechEnd({ durationMs, sizeBytes, blob }) {
+        if (mode !== "voice") return;
+        if (state !== "listening" || inFlight) return;
+        inFlight = true;
+
+        setState(reduceState(state, { type: "VAD_DONE" }));
+
+        // pause VAD during ASR/LLM/TTS but KEEP stream for continuous conversation
+        try {
+          vad?.stop({ stopStream: false });
+        } catch {}
+        vad = null;
+
+        void api.log("vad_speech_end", { durationMs: Math.round(durationMs), sizeBytes });
+
+        try {
+          const asrT0 = performance.now();
+          const { text } = await api.asr(blob);
+          void api.log("asr_done", { asrMs: msSince(asrT0) });
+
+          const userText = (text || "").trim();
+          if (!userText) {
+            stopAll("asr_empty", "音声の認識に失敗しました。テキストモードで入力してください。");
+            mode = "text";
+            ui.setMode("text");
+            return;
+          }
+
+          ui.appendMessage("user", userText);
+
+          const llmT0 = performance.now();
+          const { assistantText, intimacy } = await api.chat(userText, "voice");
+          void api.log("llm_done", { llmMs: msSince(llmT0) });
+
+          ui.appendMessage("assistant", assistantText);
+          ui.setIntimacy(intimacy?.level ?? null);
+          setState(reduceState(state, { type: "LLM_DONE" }));
+
+          const ttsT0 = performance.now();
+          void api.log("tts_start");
+          await speak(assistantText);
+          void api.log("tts_end", { ttsMs: msSince(ttsT0) });
+
+          setState(reduceState(state, { type: "TTS_END" }));
+          inFlight = false;
+          // auto continue listening
+          setState("idle");
+          void ensureVoiceListening("auto_continue");
+        } catch (e) {
+          stopAll("pipeline", `処理に失敗しました: ${safeErr(e)}`);
+        }
+      },
+      onError(err) {
+        stopAll("vad", `VADエラー: ${err.message}`);
+      },
+    });
+
+    setState("listening");
+    void api.log("listening_start", { reason, layout: layoutMode });
+    await vad.start();
+  }
+
   const ui = createUi(
     {
     onToggleOpen(open) {
       if (open) void api.log("widget_open");
       ensureConsentUi();
+        if (open) void ensureVoiceListening("open");
     },
     onSelectMode(nextMode) {
       mode = nextMode;
@@ -153,6 +279,7 @@ async function main() {
       } else {
         // voice mode: keep idle; start is enabled only after consent
         setState("idle");
+          void ensureVoiceListening("mode_switch");
       }
       ensureConsentUi();
     },
@@ -160,99 +287,12 @@ async function main() {
       localStorage.setItem(STORAGE_KEYS.consent, "accepted");
       void api.log("consent_accept");
       ensureConsentUi();
+        void ensureVoiceListening("consent_accept");
     },
     onRejectConsent() {
       localStorage.setItem(STORAGE_KEYS.consent, "rejected");
       void api.log("consent_reject");
       ensureConsentUi();
-    },
-    async onStart() {
-      ui.setError(null);
-      if (mode !== "voice") {
-        ui.setError("音声モードに切り替えてからStartしてください。");
-        return;
-      }
-      if (!hasConsent()) {
-        ui.setConsentVisible(true);
-        ui.setError("音声開始には同意が必要です。");
-        return;
-      }
-      if (state !== "idle" || inFlight) return;
-
-      setState(reduceState(state, { type: "START" }));
-
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (e) {
-        mode = "text";
-        ui.setMode("text");
-        stopAll("mic_permission", "マイクが利用できません。テキスト入力をご利用ください。");
-        return;
-      }
-
-      const recorder = createRecorder(stream);
-      vad = createVad(stream, recorder, {
-        onSpeechStart() {
-          void api.log("vad_speech_start");
-        },
-        async onSpeechEnd({ durationMs, sizeBytes, blob }) {
-          // listening -> thinking (VAD確定)
-          if (state !== "listening" || inFlight) return;
-          inFlight = true;
-
-          setState(reduceState(state, { type: "VAD_DONE" }));
-
-          // VAD停止（spec: listening中のみ稼働）
-          try {
-            vad?.stop();
-          } catch {}
-          vad = null;
-
-          void api.log("vad_speech_end", { durationMs: Math.round(durationMs), sizeBytes });
-
-          try {
-            const asrT0 = performance.now();
-            const { text } = await api.asr(blob);
-            void api.log("asr_done", { asrMs: msSince(asrT0) });
-
-            const userText = (text || "").trim();
-            if (!userText) {
-              stopAll("asr_empty", "音声の認識に失敗しました。テキスト入力をご利用ください。");
-              return;
-            }
-
-            ui.appendMessage("user", userText);
-
-            const llmT0 = performance.now();
-            const { assistantText, intimacy } = await api.chat(userText, "voice");
-            void api.log("llm_done", { llmMs: msSince(llmT0) });
-
-            ui.appendMessage("assistant", assistantText);
-            ui.setIntimacy(intimacy?.level ?? null);
-            setState(reduceState(state, { type: "LLM_DONE" }));
-
-            const ttsT0 = performance.now();
-            void api.log("tts_start");
-            const res = await speak(assistantText);
-            void api.log("tts_end", { ttsMs: res?.ttsMs ?? msSince(ttsT0) });
-
-            setState(reduceState(state, { type: "TTS_END" }));
-            inFlight = false;
-          } catch (e) {
-            stopAll("pipeline", `処理に失敗しました: ${safeErr(e)}`);
-          }
-        },
-        onError(err) {
-          stopAll("vad", `VADエラー: ${err.message}`);
-        },
-      });
-
-      await vad.start();
-    },
-    onStop() {
-      setState(reduceState(state, { type: "STOP" }));
-      stopAll("user_stop");
-      void api.log("stop");
     },
     async onSendText(text) {
       ui.setError(null);
@@ -268,7 +308,7 @@ async function main() {
 
       // ANY -> idle safety: if currently listening, stop it
       try {
-        vad?.stop();
+          vad?.stop({ stopStream: false });
       } catch {}
       vad = null;
 
@@ -332,6 +372,9 @@ async function main() {
   // Helpful first message
   ui.appendMessage("assistant", `こんにちは、Mirai Aizawaです。音声/テキストどちらでも会話できます。`);
   ui.appendMessage("assistant", `（VAD: ${VAD_CONFIG.minSpeechMs}ms/${VAD_CONFIG.silenceMs}ms/${VAD_CONFIG.maxSpeechMs}ms）`);
+
+  // Auto-start voice listening when possible (no Start button).
+  void ensureVoiceListening("boot");
 }
 
 void main();

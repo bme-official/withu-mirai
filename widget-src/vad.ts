@@ -9,7 +9,7 @@ export type VadCallbacks = {
 
 export type VadController = {
   start(): Promise<void>;
-  stop(): void;
+  stop(opts?: { stopStream?: boolean }): void;
   isRunning(): boolean;
   getStream(): MediaStream;
 };
@@ -163,8 +163,10 @@ export function createVad(stream: MediaStream, recorder: RecorderLike, cb: VadCa
         cb.onError(e instanceof Error ? e : new Error(String(e)));
       }
     },
-    stop() {
-      if (!st.running) return;
+    stop(opts) {
+      const stopStream = opts?.stopStream !== false;
+      // Allow stopping even if not running (e.g. after a speech segment),
+      // to ensure recorder/audio graph are cleaned up.
       st.running = false;
       if (st.rafId) cancelAnimationFrame(st.rafId);
       st.rafId = null;
@@ -173,7 +175,7 @@ export function createVad(stream: MediaStream, recorder: RecorderLike, cb: VadCa
         void recorder.stop();
       }
       cleanupGraph();
-      stopStreamTracks();
+      if (stopStream) stopStreamTracks();
     },
     isRunning() {
       return st.running;

@@ -6,8 +6,6 @@ export type UiLayout = "bubble" | "page";
 export type UiCallbacks = {
   onToggleOpen(open: boolean): void;
   onSelectMode(mode: "voice" | "text"): void;
-  onStart(): void;
-  onStop(): void;
   onSendText(text: string): void;
   onAcceptConsent(): void;
   onRejectConsent(): void;
@@ -23,8 +21,6 @@ export type UiController = {
   appendMessage(role: "user" | "assistant", content: string): void;
   setError(msg: string | null): void;
   setConsentVisible(visible: boolean): void;
-  setStartEnabled(enabled: boolean): void;
-  setStopEnabled(enabled: boolean): void;
   setTextFallbackEnabled(enabled: boolean): void;
 };
 
@@ -164,6 +160,16 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       100% { transform: scale(1); }
     }
     .modeTabs { display:flex; gap: 8px; }
+    .histBtn {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 9999px;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: white;
+      cursor: pointer;
+      user-select:none;
+    }
+    .histBtn.active { background: #111827; border-color: #111827; color: white; }
     .tab {
       font-size: 12px;
       padding: 6px 10px;
@@ -183,6 +189,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       gap: 10px;
       background: white;
     }
+    .hideLog .log { display:none; }
     .msg {
       max-width: 90%;
       padding: 10px 12px;
@@ -300,7 +307,11 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   right.style.display = "flex";
   right.style.alignItems = "center";
   right.style.gap = "8px";
+  const histBtn = document.createElement("div");
+  histBtn.className = "histBtn";
+  histBtn.textContent = "履歴";
   right.appendChild(tabs);
+  right.appendChild(histBtn);
   right.appendChild(status);
 
   header.appendChild(title);
@@ -362,20 +373,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     </div>
   `;
 
-  const btnRow = document.createElement("div");
-  btnRow.className = "row";
-
-  const startBtn = document.createElement("button");
-  startBtn.className = "primary";
-  startBtn.textContent = "Start";
-
-  const stopBtn = document.createElement("button");
-  stopBtn.textContent = "Stop";
-  stopBtn.disabled = true;
-
-  btnRow.appendChild(startBtn);
-  btnRow.appendChild(stopBtn);
-
   const textRow = document.createElement("div");
   textRow.className = "row";
 
@@ -395,7 +392,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
 
   footer.appendChild(error);
   footer.appendChild(consent);
-  footer.appendChild(btnRow);
   footer.appendChild(textRow);
   footer.appendChild(meta);
 
@@ -427,17 +423,33 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     cb.onToggleOpen(open);
   });
 
+  let currentMode: "voice" | "text" = "voice";
+  let historyOpen = true;
+  function applyVisibility() {
+    const showHistory = currentMode === "text" ? true : historyOpen;
+    panel.classList.toggle("hideLog", !showHistory);
+    // in voice mode, hide text input completely
+    textRow.style.display = currentMode === "text" ? "flex" : "none";
+  }
+
   function setActiveTab(mode: "voice" | "text") {
     tabVoice.classList.toggle("active", mode === "voice");
     tabText.classList.toggle("active", mode === "text");
     heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
+    currentMode = mode;
+    if (mode === "text") historyOpen = true;
+    applyVisibility();
     cb.onSelectMode(mode);
   }
   tabVoice.addEventListener("click", () => setActiveTab("voice"));
   tabText.addEventListener("click", () => setActiveTab("text"));
 
-  startBtn.addEventListener("click", () => cb.onStart());
-  stopBtn.addEventListener("click", () => cb.onStop());
+  histBtn.addEventListener("click", () => {
+    if (currentMode === "text") return;
+    historyOpen = !historyOpen;
+    histBtn.classList.toggle("active", historyOpen);
+    applyVisibility();
+  });
 
   sendBtn.addEventListener("click", () => {
     const t = textarea.value.trim();
@@ -468,6 +480,10 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
         open = true;
         panel.classList.add("open");
       }
+      // default: in voice mode, hide history (minimal UI); in text mode show
+      historyOpen = false;
+      histBtn.classList.toggle("active", historyOpen);
+      applyVisibility();
     },
     setOpen(next) {
       open = next;
@@ -482,9 +498,14 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       heroAvatar.classList.toggle("speaking", s === "speaking");
     },
     setMode(mode) {
+      currentMode = mode;
+      if (mode === "text") historyOpen = true;
+      if (mode === "voice") historyOpen = false;
       tabVoice.classList.toggle("active", mode === "voice");
       tabText.classList.toggle("active", mode === "text");
       heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
+      histBtn.classList.toggle("active", currentMode === "text" ? true : historyOpen);
+      applyVisibility();
     },
     setProfile(profile) {
       currentDisplayName = profile.displayName;
@@ -515,12 +536,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     },
     setConsentVisible(visible) {
       consent.classList.toggle("show", visible);
-    },
-    setStartEnabled(enabled) {
-      startBtn.disabled = !enabled;
-    },
-    setStopEnabled(enabled) {
-      stopBtn.disabled = !enabled;
     },
     setTextFallbackEnabled(enabled) {
       textarea.disabled = !enabled;
