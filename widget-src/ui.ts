@@ -131,6 +131,44 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       .page .log { padding: 18px; }
       .page .footer { padding: 18px; }
     }
+
+    /* SP (mobile): match requested layout */
+    .footerControls {
+      display: none;
+      width: 100%;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .footerControls .modeTabs { gap: 10px; }
+
+    @media (max-width: 640px) {
+      .page .header { display: none; }
+      .page .footer { position: sticky; bottom: 0; background: #fff; }
+      .page .footerControls { display: flex; }
+
+      /* Bigger avatar on voice mode */
+      .page .panel.voiceOnly .heroAvatar { width: 168px; height: 168px; }
+
+      /* Voice mode: hero (avatar+status) then bottom controls only */
+      .page .panel.voiceOnly.open {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+        grid-template-areas:
+          "hero"
+          "footer";
+      }
+
+      /* Text mode: log then footer (controls + input + send) */
+      .page .panel.open:not(.voiceOnly) {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+        grid-template-areas:
+          "log"
+          "footer";
+      }
+      .page .panel.open:not(.voiceOnly) .hero { display: none; }
+    }
     .header {
       display:flex; align-items:center; justify-content:space-between;
       padding: 12px 12px;
@@ -416,6 +454,28 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
 
   const footer = document.createElement("div");
   footer.className = "footer";
+  // footer controls (for mobile layout): mute + mode toggle
+  const footerControls = document.createElement("div");
+  footerControls.className = "footerControls";
+  const footerMuteBtn = document.createElement("div");
+  footerMuteBtn.className = "muteBtn";
+  footerMuteBtn.setAttribute("role", "button");
+  footerMuteBtn.setAttribute("tabindex", "0");
+  footerMuteBtn.setAttribute("aria-label", "mute toggle");
+
+  const footerTabs = document.createElement("div");
+  footerTabs.className = "modeTabs";
+  const footerTabVoice = document.createElement("div");
+  footerTabVoice.className = "tab active";
+  footerTabVoice.textContent = "音声";
+  const footerTabText = document.createElement("div");
+  footerTabText.className = "tab";
+  footerTabText.textContent = "テキスト";
+  footerTabs.appendChild(footerTabVoice);
+  footerTabs.appendChild(footerTabText);
+
+  footerControls.appendChild(footerMuteBtn);
+  footerControls.appendChild(footerTabs);
 
   const error = document.createElement("div");
   error.className = "error";
@@ -453,6 +513,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
 
   footer.appendChild(error);
   footer.appendChild(consent);
+  footer.appendChild(footerControls);
   footer.appendChild(textRow);
   footer.appendChild(meta);
 
@@ -500,10 +561,14 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     <path d="M8 21h8" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M4 4l16 16" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
+  function renderMuteFor(el: HTMLElement) {
+    el.classList.toggle("muted", muted);
+    el.innerHTML = muted ? `${micOffSvg}<span class="mutedLabel">muted</span>` : micSvg;
+    el.setAttribute("aria-pressed", muted ? "true" : "false");
+  }
   function renderMute() {
-    muteBtn.classList.toggle("muted", muted);
-    muteBtn.innerHTML = muted ? `${micOffSvg}<span class="mutedLabel">muted</span>` : micSvg;
-    muteBtn.setAttribute("aria-pressed", muted ? "true" : "false");
+    renderMuteFor(muteBtn);
+    renderMuteFor(footerMuteBtn);
   }
   function applyVisibility() {
     const showHistory = currentMode === "text";
@@ -512,12 +577,15 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     // in voice mode, hide text input completely
     textRow.style.display = currentMode === "text" ? "flex" : "none";
     muteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
+    footerMuteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
     renderMute();
   }
 
   function setActiveTab(mode: "voice" | "text") {
     tabVoice.classList.toggle("active", mode === "voice");
     tabText.classList.toggle("active", mode === "text");
+    footerTabVoice.classList.toggle("active", mode === "voice");
+    footerTabText.classList.toggle("active", mode === "text");
     heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
     currentMode = mode;
     applyVisibility();
@@ -525,6 +593,8 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   }
   tabVoice.addEventListener("click", () => setActiveTab("voice"));
   tabText.addEventListener("click", () => setActiveTab("text"));
+  footerTabVoice.addEventListener("click", () => setActiveTab("voice"));
+  footerTabText.addEventListener("click", () => setActiveTab("text"));
 
   muteBtn.addEventListener("click", () => {
     if (currentMode !== "voice") return;
@@ -536,6 +606,19 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
       muteBtn.click();
+    }
+  });
+
+  footerMuteBtn.addEventListener("click", () => {
+    if (currentMode !== "voice") return;
+    muted = !muted;
+    cb.onToggleMute(muted);
+    renderMute();
+  });
+  footerMuteBtn.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      footerMuteBtn.click();
     }
   });
 
@@ -586,6 +669,8 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       currentMode = mode;
       tabVoice.classList.toggle("active", mode === "voice");
       tabText.classList.toggle("active", mode === "text");
+      footerTabVoice.classList.toggle("active", mode === "voice");
+      footerTabText.classList.toggle("active", mode === "text");
       heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
       applyVisibility();
     },
