@@ -171,7 +171,18 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       cursor: pointer;
       user-select:none;
     }
-    .muteBtn.active { background: #111827; border-color: #111827; color: white; }
+    .muteBtn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      line-height: 1;
+    }
+    .muteBtn svg { width: 16px; height: 16px; display:block; }
+    .muteBtn .mutedLabel { font-weight: 700; color: #ef4444; }
+    .muteBtn.muted {
+      border-color: rgba(239,68,68,0.35);
+      background: rgba(239,68,68,0.08);
+    }
     .tab {
       font-size: 12px;
       padding: 6px 10px;
@@ -311,7 +322,9 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   right.style.gap = "8px";
   const muteBtn = document.createElement("div");
   muteBtn.className = "muteBtn";
-  muteBtn.textContent = "🔈 ミュート解除";
+  muteBtn.setAttribute("role", "button");
+  muteBtn.setAttribute("tabindex", "0");
+  muteBtn.setAttribute("aria-label", "mute toggle");
   right.appendChild(tabs);
   right.appendChild(muteBtn);
   right.appendChild(status);
@@ -427,12 +440,32 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
 
   let currentMode: "voice" | "text" = "voice";
   let muted = false;
+  const micSvg = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M19 11a7 7 0 0 1-14 0" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M12 18v3" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M8 21h8" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+  const micOffSvg = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M9 10v1a3 3 0 0 0 5.12 2.12" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M15 9V6a3 3 0 0 0-5.76-1.24" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M19 11a7 7 0 0 1-7 7c-1.08 0-2.1-.24-3.02-.68" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M12 18v3" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M8 21h8" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M4 4l16 16" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+  function renderMute() {
+    muteBtn.classList.toggle("muted", muted);
+    muteBtn.innerHTML = muted ? `${micOffSvg}<span class="mutedLabel">muted</span>` : micSvg;
+    muteBtn.setAttribute("aria-pressed", muted ? "true" : "false");
+  }
   function applyVisibility() {
     const showHistory = currentMode === "text";
     panel.classList.toggle("hideLog", !showHistory);
     // in voice mode, hide text input completely
     textRow.style.display = currentMode === "text" ? "flex" : "none";
     muteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
+    renderMute();
   }
 
   function setActiveTab(mode: "voice" | "text") {
@@ -449,9 +482,14 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   muteBtn.addEventListener("click", () => {
     if (currentMode !== "voice") return;
     muted = !muted;
-    muteBtn.classList.toggle("active", muted);
-    muteBtn.textContent = muted ? "🔇 ミュート中" : "🔈 ミュート解除";
     cb.onToggleMute(muted);
+    renderMute();
+  });
+  muteBtn.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      muteBtn.click();
+    }
   });
 
   sendBtn.addEventListener("click", () => {
@@ -506,8 +544,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     },
     setMuted(next) {
       muted = next;
-      muteBtn.classList.toggle("active", muted);
-      muteBtn.textContent = muted ? "🔇 ミュート中" : "🔈 ミュート解除";
+      renderMute();
     },
     setProfile(profile) {
       currentDisplayName = profile.displayName;
