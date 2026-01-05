@@ -12,6 +12,7 @@ export const VAD_CONFIG = {
 export const STORAGE_KEYS = {
   consent: "withu_voice_consent_v1",
   userIdPrefix: "withu_user_id_v1:",
+  ttsMutedPrefix: "withu_tts_muted_v1:",
 } as const;
 
 export const UI_TEXT = {

@@ -105,7 +105,8 @@ async function main() {
   const overrideAvatarUrl = script.dataset.avatarUrl || null;
   const userIdStorageKey = `${STORAGE_KEYS.userIdPrefix}${siteId}`;
   const layout = (script.dataset.layout || script.dataset.mode || "bubble") === "page" ? "page" : "bubble";
-  const ttsMode = (script.dataset.tts || "auto").toLowerCase(); // auto|webspeech|server
+  // Requirement: always use server-side TTS for reliable playback.
+  const ttsMode: "server" = "server";
 
   let state: WidgetState = "idle";
   let inFlight = false;
@@ -115,7 +116,7 @@ async function main() {
   let mode: "voice" | "text" = "voice";
   let ttsVoiceHint: string | null = null;
   let layoutMode: "bubble" | "page" = layout;
-  let preferServerTts = ttsMode === "server";
+  let muted = false;
 
   async function speakWithServerTts(text: string): Promise<{ ttsMs: number } | null> {
     try {
@@ -201,10 +202,10 @@ async function main() {
 
   async function speak(text: string) {
     // speaking中はVADが絶対に動かないよう、state遷移とstopが先
-    if (ttsMode === "webspeech") return await speakWithWebSpeech(text, ttsVoiceHint);
-    if (preferServerTts || ttsMode === "server") return await speakWithServerTts(text);
-    const res = await speakWithWebSpeech(text, ttsVoiceHint);
-    if (res) return res;
+    if (muted) {
+      void api.log("tts_muted", { len: text.length });
+      return null;
+    }
     return await speakWithServerTts(text);
   }
 
@@ -315,29 +316,15 @@ async function main() {
       }
       ensureConsentUi();
     },
-    async onTestTts() {
-      // user-gesture triggered test; should help with browsers that block background audio
-      if (mode !== "voice") return;
-      ui.setError(null);
-      try {
-        // pause VAD during test playback
+    onToggleMute(next) {
+      muted = next;
+      ui.setMuted(muted);
+      if (muted) {
         try {
-          vad?.stop({ stopStream: false });
+          window.speechSynthesis?.cancel?.();
         } catch {}
-        vad = null;
-        setState("speaking");
-        // Force server TTS on test to bypass SpeechSynthesis issues
-        const res = await speakWithServerTts("テストです。聞こえますか？");
-        if (res) {
-          preferServerTts = true;
-        } else {
-          ui.setError("音が出ません。タブ/サイトのミュート、OSの出力先、ブラウザの音声許可を確認してください。");
-        }
-      } finally {
-        inFlight = false;
-        setState("idle");
-        void ensureVoiceListening("tts_test");
       }
+      void api.log("tts_mute_toggle", { muted });
     },
     onAcceptConsent() {
       localStorage.setItem(STORAGE_KEYS.consent, "accepted");

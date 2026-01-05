@@ -7,7 +7,7 @@ export type UiCallbacks = {
   onToggleOpen(open: boolean): void;
   onSelectMode(mode: "voice" | "text"): void;
   onSendText(text: string): void;
-  onTestTts(): void;
+  onToggleMute(muted: boolean): void;
   onAcceptConsent(): void;
   onRejectConsent(): void;
 };
@@ -19,6 +19,7 @@ export type UiController = {
   setMode(mode: "voice" | "text"): void;
   setProfile(profile: { displayName: string; avatarUrl: string | null }): void;
   setIntimacy(level: number | null): void;
+  setMuted(muted: boolean): void;
   appendMessage(role: "user" | "assistant", content: string): void;
   setError(msg: string | null): void;
   setConsentVisible(visible: boolean): void;
@@ -161,7 +162,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       100% { transform: scale(1); }
     }
     .modeTabs { display:flex; gap: 8px; }
-    .histBtn {
+    .muteBtn {
       font-size: 12px;
       padding: 6px 10px;
       border-radius: 9999px;
@@ -170,16 +171,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       cursor: pointer;
       user-select:none;
     }
-    .histBtn.active { background: #111827; border-color: #111827; color: white; }
-    .ttsBtn {
-      font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 9999px;
-      border: 1px solid rgba(0,0,0,0.12);
-      background: white;
-      cursor: pointer;
-      user-select:none;
-    }
+    .muteBtn.active { background: #111827; border-color: #111827; color: white; }
     .tab {
       font-size: 12px;
       padding: 6px 10px;
@@ -317,15 +309,11 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   right.style.display = "flex";
   right.style.alignItems = "center";
   right.style.gap = "8px";
-  const ttsBtn = document.createElement("div");
-  ttsBtn.className = "ttsBtn";
-  ttsBtn.textContent = "🔊テスト";
-  const histBtn = document.createElement("div");
-  histBtn.className = "histBtn";
-  histBtn.textContent = "履歴";
+  const muteBtn = document.createElement("div");
+  muteBtn.className = "muteBtn";
+  muteBtn.textContent = "🔈 ミュート解除";
   right.appendChild(tabs);
-  right.appendChild(ttsBtn);
-  right.appendChild(histBtn);
+  right.appendChild(muteBtn);
   right.appendChild(status);
 
   header.appendChild(title);
@@ -438,13 +426,13 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   });
 
   let currentMode: "voice" | "text" = "voice";
-  let historyOpen = true;
+  let muted = false;
   function applyVisibility() {
-    const showHistory = currentMode === "text" ? true : historyOpen;
+    const showHistory = currentMode === "text";
     panel.classList.toggle("hideLog", !showHistory);
     // in voice mode, hide text input completely
     textRow.style.display = currentMode === "text" ? "flex" : "none";
-    ttsBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
+    muteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
   }
 
   function setActiveTab(mode: "voice" | "text") {
@@ -452,21 +440,18 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     tabText.classList.toggle("active", mode === "text");
     heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
     currentMode = mode;
-    if (mode === "text") historyOpen = true;
     applyVisibility();
     cb.onSelectMode(mode);
   }
   tabVoice.addEventListener("click", () => setActiveTab("voice"));
   tabText.addEventListener("click", () => setActiveTab("text"));
 
-  histBtn.addEventListener("click", () => {
-    if (currentMode === "text") return;
-    historyOpen = !historyOpen;
-    histBtn.classList.toggle("active", historyOpen);
-    applyVisibility();
-  });
-  ttsBtn.addEventListener("click", () => {
-    cb.onTestTts();
+  muteBtn.addEventListener("click", () => {
+    if (currentMode !== "voice") return;
+    muted = !muted;
+    muteBtn.classList.toggle("active", muted);
+    muteBtn.textContent = muted ? "🔇 ミュート中" : "🔈 ミュート解除";
+    cb.onToggleMute(muted);
   });
 
   sendBtn.addEventListener("click", () => {
@@ -498,9 +483,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
         open = true;
         panel.classList.add("open");
       }
-      // default: in voice mode, hide history (minimal UI); in text mode show
-      historyOpen = false;
-      histBtn.classList.toggle("active", historyOpen);
       applyVisibility();
     },
     setOpen(next) {
@@ -517,13 +499,15 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     },
     setMode(mode) {
       currentMode = mode;
-      if (mode === "text") historyOpen = true;
-      if (mode === "voice") historyOpen = false;
       tabVoice.classList.toggle("active", mode === "voice");
       tabText.classList.toggle("active", mode === "text");
       heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
-      histBtn.classList.toggle("active", currentMode === "text" ? true : historyOpen);
       applyVisibility();
+    },
+    setMuted(next) {
+      muted = next;
+      muteBtn.classList.toggle("active", muted);
+      muteBtn.textContent = muted ? "🔇 ミュート中" : "🔈 ミュート解除";
     },
     setProfile(profile) {
       currentDisplayName = profile.displayName;
