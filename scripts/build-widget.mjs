@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const rootDir = process.cwd();
@@ -8,6 +8,14 @@ const outDir = path.join(rootDir, "widget-dist");
 const outFile = path.join(outDir, "widget.js");
 
 await mkdir(outDir, { recursive: true });
+
+// Workaround: in some sandboxed environments, esbuild cannot truncate an existing output file.
+// Deleting first avoids "operation not permitted" on open().
+try {
+  await unlink(outFile);
+} catch {
+  // ignore if missing
+}
 
 await build({
   entryPoints: [entry],

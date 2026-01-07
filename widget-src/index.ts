@@ -56,7 +56,7 @@ async function speakWithWebSpeech(text: string, voiceHint: string | null): Promi
   }
   // Prepare voice selection BEFORE calling speak() to avoid "no sound" on some browsers.
   const ut = new SpeechSynthesisUtterance(text);
-  ut.lang = document.documentElement.lang || "ja-JP";
+  ut.lang = document.documentElement.lang || "en-US";
   ut.rate = 1.0;
   ut.pitch = 1.0;
   ut.volume = 1.0;
@@ -201,7 +201,7 @@ async function main() {
   }
 
   async function speak(text: string) {
-    // speaking中はVADが絶対に動かないよう、state遷移とstopが先
+    // Ensure VAD is never running while speaking (stop first, then proceed).
     if (muted) {
       void api.log("tts_muted", { len: text.length });
       return null;
@@ -222,7 +222,7 @@ async function main() {
       } catch (e) {
         // Don't force-switch; user may need a gesture or permission.
         setState("idle");
-        ui.setError("マイクが利用できません。ブラウザの許可を確認し、画面をタップして再試行してください。");
+        ui.setError("Microphone is unavailable. Check browser permissions and tap the page to try again.");
         void api.log("mic_permission", { message: safeErr(e) });
         return;
       }
@@ -255,7 +255,7 @@ async function main() {
 
           const userText = (text || "").trim();
           if (!userText) {
-            stopAll("asr_empty", "音声の認識に失敗しました。テキストモードで入力してください。");
+            stopAll("asr_empty", "I couldn't transcribe that. Please switch to Text mode and type your message.");
             mode = "text";
             ui.setMode("text");
             return;
@@ -282,11 +282,11 @@ async function main() {
           setState("idle");
           void ensureVoiceListening("auto_continue");
         } catch (e) {
-          stopAll("pipeline", `処理に失敗しました: ${safeErr(e)}`);
+          stopAll("pipeline", `Something went wrong: ${safeErr(e)}`);
         }
       },
       onError(err) {
-        stopAll("vad", `VADエラー: ${err.message}`);
+        stopAll("vad", `VAD error: ${err.message}`);
       },
     });
 
@@ -340,12 +340,12 @@ async function main() {
     async onSendText(text) {
       ui.setError(null);
       if (mode !== "text") {
-        ui.setError("テキストモードに切り替えて送信してください。");
+        ui.setError("Switch to Text mode to send a message.");
         return;
       }
       if (inFlight) return;
       if (!api.sessionId) {
-        ui.setError("セッション初期化中です。少し待ってからもう一度お試しください。");
+        ui.setError("Initializing session… Please wait a moment and try again.");
         return;
       }
 
@@ -371,7 +371,7 @@ async function main() {
         const res = await speak(assistantText);
         void api.log("tts_end", { ttsMs: res?.ttsMs ?? 0 });
       } catch (e) {
-        stopAll("chat_text", `チャットに失敗しました: ${safeErr(e)}`);
+        stopAll("chat_text", `Chat failed: ${safeErr(e)}`);
       } finally {
         inFlight = false;
         setState("idle");
@@ -409,12 +409,12 @@ async function main() {
     localStorage.setItem(userIdStorageKey, sess.userId);
     ui.setIntimacy(sess.intimacy?.level ?? null);
   } catch (e) {
-    ui.setError("セッション初期化に失敗しました。ページを再読み込みしてください。");
+    ui.setError("Failed to initialize session. Please reload the page.");
   }
 
   // Helpful first message
-  ui.appendMessage("assistant", `こんにちは、Mirai Aizawaです。音声/テキストどちらでも会話できます。`);
-  ui.appendMessage("assistant", `（VAD: ${VAD_CONFIG.minSpeechMs}ms/${VAD_CONFIG.silenceMs}ms/${VAD_CONFIG.maxSpeechMs}ms）`);
+  ui.appendMessage("assistant", `Hi, I'm Mirai Aizawa. You can chat in Voice or Text mode.`);
+  ui.appendMessage("assistant", `(VAD: ${VAD_CONFIG.minSpeechMs}ms/${VAD_CONFIG.silenceMs}ms/${VAD_CONFIG.maxSpeechMs}ms)`);
 
   // Auto-start voice listening when possible (no Start button).
   void ensureVoiceListening("boot");

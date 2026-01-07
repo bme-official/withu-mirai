@@ -16,7 +16,22 @@ export const STORAGE_KEYS = {
 } as const;
 
 export const UI_TEXT = {
-  title: "音声チャット",
+  // All widget UI copy should be English (conversation UX is designed for English by default).
+  title: "Chat",
+  voice: "Voice",
+  text: "Text",
+  send: "Send",
+  placeholder: "Type a message…",
+  heroPrompt: "Talk to me",
+  modeVoice: "Voice mode",
+  modeText: "Text mode",
+  consentTitle: "Microphone & logging consent",
+  consentBody:
+    "To enable voice chat, we will send your microphone audio for transcription and store conversation/event logs. " +
+    "If you do not agree, you can still use text chat.",
+  consentAccept: "I agree",
+  consentReject: "No thanks",
+  intimacyLabel: "Intimacy",
 } as const;
 
 

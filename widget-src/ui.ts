@@ -83,8 +83,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     .page .log { padding: 16px; }
     .page .footer { padding: 16px; }
     .page .status { display:none; }
-    .page .modeTabs { gap: 10px; }
-    .page .tab { padding: 8px 12px; font-size: 13px; }
     /* Page layout: mobile is single column; desktop becomes 2 columns in text mode */
     .page .panel.open {
       display: grid;
@@ -140,7 +138,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       justify-content: space-between;
       gap: 10px;
     }
-    .footerControls .modeTabs { gap: 10px; }
 
     @media (max-width: 640px) {
       .page .header { display: none; }
@@ -246,6 +243,47 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       100% { transform: scale(1); }
     }
     .modeTabs { display:flex; gap: 8px; }
+    .modeSwitch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .modeSwitch .modeLabel { opacity: 0.7; }
+    .modeSwitch[data-mode="voice"] .modeLabel.voice { opacity: 1; }
+    .modeSwitch[data-mode="text"] .modeLabel.text { opacity: 1; }
+    .modeSwitch input { display:none; }
+    .modeSwitch .track {
+      width: 56px;
+      height: 28px;
+      border-radius: 9999px;
+      background: rgba(0,0,0,0.10);
+      border: 1px solid rgba(0,0,0,0.12);
+      position: relative;
+      display: inline-block;
+      flex: none;
+    }
+    .modeSwitch .thumb {
+      width: 24px;
+      height: 24px;
+      border-radius: 9999px;
+      background: white;
+      border: 1px solid rgba(0,0,0,0.12);
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      left: 2px;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+      transition: left 160ms ease;
+    }
+    .modeSwitch[data-mode="text"] .thumb { left: 30px; }
+    .modeSwitch:focus-within .track {
+      outline: 3px solid rgba(109,40,217,0.25);
+      outline-offset: 2px;
+      border-color: rgba(109,40,217,0.35);
+    }
     .muteBtn {
       font-size: 12px;
       padding: 6px 10px;
@@ -267,16 +305,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       border-color: rgba(239,68,68,0.35);
       background: rgba(239,68,68,0.08);
     }
-    .tab {
-      font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 9999px;
-      border: 1px solid rgba(0,0,0,0.12);
-      background: white;
-      cursor: pointer;
-      user-select:none;
-    }
-    .tab.active { background: #111827; border-color: #111827; color: white; }
     .log {
       flex: 1;
       overflow: auto;
@@ -389,16 +417,42 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   status.className = "status";
   status.textContent = "idle";
 
-  const tabs = document.createElement("div");
-  tabs.className = "modeTabs";
-  const tabVoice = document.createElement("div");
-  tabVoice.className = "tab active";
-  tabVoice.textContent = "音声";
-  const tabText = document.createElement("div");
-  tabText.className = "tab";
-  tabText.textContent = "テキスト";
-  tabs.appendChild(tabVoice);
-  tabs.appendChild(tabText);
+  function createModeSwitch(): { root: HTMLLabelElement; input: HTMLInputElement } {
+    // Left = Voice (unchecked), Right = Text (checked)
+    const root = document.createElement("label");
+    root.className = "modeSwitch";
+    root.setAttribute("role", "switch");
+    root.setAttribute("aria-label", "mode toggle");
+    root.setAttribute("aria-checked", "false");
+    root.setAttribute("data-mode", "voice");
+    root.tabIndex = 0;
+
+    const voice = document.createElement("span");
+    voice.className = "modeLabel voice";
+    voice.textContent = UI_TEXT.voice;
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+
+    const track = document.createElement("span");
+    track.className = "track";
+    const thumb = document.createElement("span");
+    thumb.className = "thumb";
+    track.appendChild(thumb);
+
+    const text = document.createElement("span");
+    text.className = "modeLabel text";
+    text.textContent = UI_TEXT.text;
+
+    root.appendChild(voice);
+    root.appendChild(input);
+    root.appendChild(track);
+    root.appendChild(text);
+
+    return { root, input };
+  }
+
+  const headerMode = createModeSwitch();
 
   const right = document.createElement("div");
   right.style.display = "flex";
@@ -409,7 +463,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   muteBtn.setAttribute("role", "button");
   muteBtn.setAttribute("tabindex", "0");
   muteBtn.setAttribute("aria-label", "mute toggle");
-  right.appendChild(tabs);
+  right.appendChild(headerMode.root);
   right.appendChild(muteBtn);
   right.appendChild(status);
 
@@ -431,7 +485,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   heroName.textContent = "Mirai Aizawa";
   const heroSub = document.createElement("div");
   heroSub.className = "heroSub";
-  heroSub.textContent = "ここから話しかけてね";
+  heroSub.textContent = UI_TEXT.heroPrompt;
 
   const heroPills = document.createElement("div");
   heroPills.className = "heroPills";
@@ -440,7 +494,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   heroStatus.textContent = "idle";
   const heroMode = document.createElement("div");
   heroMode.className = "pill";
-  heroMode.textContent = "音声/テキスト";
+  heroMode.textContent = `${UI_TEXT.voice}/${UI_TEXT.text}`;
   heroPills.appendChild(heroMode);
   heroPills.appendChild(heroStatus);
 
@@ -463,19 +517,10 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   footerMuteBtn.setAttribute("tabindex", "0");
   footerMuteBtn.setAttribute("aria-label", "mute toggle");
 
-  const footerTabs = document.createElement("div");
-  footerTabs.className = "modeTabs";
-  const footerTabVoice = document.createElement("div");
-  footerTabVoice.className = "tab active";
-  footerTabVoice.textContent = "音声";
-  const footerTabText = document.createElement("div");
-  footerTabText.className = "tab";
-  footerTabText.textContent = "テキスト";
-  footerTabs.appendChild(footerTabVoice);
-  footerTabs.appendChild(footerTabText);
+  const footerMode = createModeSwitch();
 
   footerControls.appendChild(footerMuteBtn);
-  footerControls.appendChild(footerTabs);
+  footerControls.appendChild(footerMode.root);
 
   const error = document.createElement("div");
   error.className = "error";
@@ -483,14 +528,13 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   const consent = document.createElement("div");
   consent.className = "consent";
   consent.innerHTML = `
-    <div><b>録音とログ保存の同意</b></div>
+    <div><b>${UI_TEXT.consentTitle}</b></div>
     <div class="small">
-      音声会話のためにマイク音声を送信して文字起こしし、会話/イベントログを保存します。<br/>
-      同意しない場合、音声開始はできません（テキスト入力は利用できます）。
+      ${UI_TEXT.consentBody}
     </div>
     <div class="row" style="margin-top: 8px;">
-      <button data-act="consent-reject">同意しない</button>
-      <button class="primary" data-act="consent-accept">同意する</button>
+      <button data-act="consent-reject">${UI_TEXT.consentReject}</button>
+      <button class="primary" data-act="consent-accept">${UI_TEXT.consentAccept}</button>
     </div>
   `;
 
@@ -498,11 +542,11 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   textRow.className = "row";
 
   const textarea = document.createElement("textarea");
-  textarea.placeholder = "音声が使えない場合はここに入力して送信…";
+  textarea.placeholder = UI_TEXT.placeholder;
   textarea.disabled = false;
 
   const sendBtn = document.createElement("button");
-  sendBtn.textContent = "送信";
+  sendBtn.textContent = UI_TEXT.send;
 
   textRow.appendChild(textarea);
   textRow.appendChild(sendBtn);
@@ -581,20 +625,38 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     renderMute();
   }
 
-  function setActiveTab(mode: "voice" | "text") {
-    tabVoice.classList.toggle("active", mode === "voice");
-    tabText.classList.toggle("active", mode === "text");
-    footerTabVoice.classList.toggle("active", mode === "voice");
-    footerTabText.classList.toggle("active", mode === "text");
-    heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
+  function applyModeSwitchUi(mode: "voice" | "text") {
+    headerMode.input.checked = mode === "text";
+    headerMode.root.setAttribute("data-mode", mode);
+    headerMode.root.setAttribute("aria-checked", mode === "text" ? "true" : "false");
+    footerMode.input.checked = mode === "text";
+    footerMode.root.setAttribute("data-mode", mode);
+    footerMode.root.setAttribute("aria-checked", mode === "text" ? "true" : "false");
+  }
+
+  function setActiveMode(mode: "voice" | "text") {
+    applyModeSwitchUi(mode);
+    heroMode.textContent = mode === "voice" ? UI_TEXT.modeVoice : UI_TEXT.modeText;
     currentMode = mode;
     applyVisibility();
     cb.onSelectMode(mode);
   }
-  tabVoice.addEventListener("click", () => setActiveTab("voice"));
-  tabText.addEventListener("click", () => setActiveTab("text"));
-  footerTabVoice.addEventListener("click", () => setActiveTab("voice"));
-  footerTabText.addEventListener("click", () => setActiveTab("text"));
+
+  headerMode.input.addEventListener("change", () => setActiveMode(headerMode.input.checked ? "text" : "voice"));
+  footerMode.input.addEventListener("change", () => setActiveMode(footerMode.input.checked ? "text" : "voice"));
+
+  // Make the whole label keyboard-toggle friendly
+  function wireSwitchKeyboard(root: HTMLElement, input: HTMLInputElement) {
+    root.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        input.checked = !input.checked;
+        input.dispatchEvent(new Event("change"));
+      }
+    });
+  }
+  wireSwitchKeyboard(headerMode.root, headerMode.input);
+  wireSwitchKeyboard(footerMode.root, footerMode.input);
 
   muteBtn.addEventListener("click", () => {
     if (currentMode !== "voice") return;
@@ -667,11 +729,8 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     },
     setMode(mode) {
       currentMode = mode;
-      tabVoice.classList.toggle("active", mode === "voice");
-      tabText.classList.toggle("active", mode === "text");
-      footerTabVoice.classList.toggle("active", mode === "voice");
-      footerTabText.classList.toggle("active", mode === "text");
-      heroMode.textContent = mode === "voice" ? "音声モード" : "テキストモード";
+      applyModeSwitchUi(mode);
+      heroMode.textContent = mode === "voice" ? UI_TEXT.modeVoice : UI_TEXT.modeText;
       applyVisibility();
     },
     setMuted(next) {
@@ -680,14 +739,18 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     },
     setProfile(profile) {
       currentDisplayName = profile.displayName;
-      subEl.textContent = currentIntimacy ? `${currentDisplayName} • 親密度 Lv${currentIntimacy}` : currentDisplayName;
+      subEl.textContent = currentIntimacy
+        ? `${currentDisplayName} • ${UI_TEXT.intimacyLabel} Lv${currentIntimacy}`
+        : currentDisplayName;
       heroName.textContent = profile.displayName;
       if (profile.avatarUrl) avatarImg.src = profile.avatarUrl;
       if (profile.avatarUrl) heroAvatarImg.src = profile.avatarUrl;
     },
     setIntimacy(level) {
       currentIntimacy = level;
-      subEl.textContent = currentIntimacy ? `${currentDisplayName} • 親密度 Lv${currentIntimacy}` : currentDisplayName;
+      subEl.textContent = currentIntimacy
+        ? `${currentDisplayName} • ${UI_TEXT.intimacyLabel} Lv${currentIntimacy}`
+        : currentDisplayName;
     },
     appendMessage(role, content) {
       const div = document.createElement("div");
