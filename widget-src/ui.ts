@@ -79,10 +79,9 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     .page .bubble { display: none !important; }
     .page .panel {
       width: 100vw;
-      /* Prefer dynamic viewport units on mobile browsers */
-      height: 100dvh;
-      height: 100svh;
-      height: 100vh;
+      /* Use JS-measured viewport height on mobile so footer stays visible above browser UI. */
+      height: var(--withu-vh, 100dvh);
+      max-height: var(--withu-vh, 100dvh);
       border-radius: 0;
       margin-bottom: 0;
     }
@@ -153,7 +152,12 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
 
     @media (max-width: 640px) {
       .page .header { display: none; }
-      .page .footer { position: sticky; bottom: 0; background: #fff; }
+      .page .footer {
+        position: sticky;
+        bottom: 0;
+        background: #fff;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
+      }
       .page .footerControls { display: flex; }
 
       /* Voice mode: hero avatar should fill the entire hero area (full-bleed) */
@@ -970,6 +974,16 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       // Map RMS (roughly 0..0.2) into 0..1 for UI.
       const lvl = Math.max(0, Math.min(1, (rms - 0.01) / 0.09));
       const spans = listenBars.querySelectorAll("span");
+      // When effectively silent, keep bars steady (no wobble / no motion).
+      if (lvl < 0.02) {
+        barPrev[0] = 0.12;
+        barPrev[1] = 0.10;
+        barPrev[2] = 0.08;
+        (spans[0] as HTMLElement | undefined)?.style.setProperty("transform", `scaleY(0.12)`);
+        (spans[1] as HTMLElement | undefined)?.style.setProperty("transform", `scaleY(0.10)`);
+        (spans[2] as HTMLElement | undefined)?.style.setProperty("transform", `scaleY(0.08)`);
+        return;
+      }
       // Stronger, de-correlated motion:
       // - each bar has its own "wobble" frequency/phase
       // - each bar uses a different smoothing constant (fast/medium/slow)
@@ -978,9 +992,9 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
       const wob = (freq: number, phase: number) => Math.sin(t * freq + phase); // -1..1
       const targets = [
-        clamp01(lvl + 0.28 * wob(9.5, 0.2)),
-        clamp01(lvl + 0.34 * wob(7.2, 2.0)),
-        clamp01(lvl + 0.22 * wob(12.8, 4.1)),
+        clamp01(lvl + lvl * 0.28 * wob(9.5, 0.2)),
+        clamp01(lvl + lvl * 0.34 * wob(7.2, 2.0)),
+        clamp01(lvl + lvl * 0.22 * wob(12.8, 4.1)),
       ];
       const alphas = [0.55, 0.28, 0.16]; // fast/medium/slow
       for (let i = 0; i < 3; i++) {
