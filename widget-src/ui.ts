@@ -1,5 +1,5 @@
 import type { WidgetState } from "./stateMachine";
-import { UI_TEXT, WIDGET_VERSION } from "./constants";
+import { UI_TEXT } from "./constants";
 
 export type UiLayout = "bubble" | "page";
 
@@ -443,15 +443,20 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     textarea {
       width: 100%;
-      min-height: 44px;
-      max-height: 120px;
-      resize: vertical;
+      min-height: 44px; /* 1 line */
+      max-height: 120px; /* JS will clamp to 4 lines */
+      resize: none;
       padding: 10px 12px;
       border-radius: 12px;
       border: 1px solid rgba(0,0,0,0.12);
       font: inherit;
       background: white;
+      line-height: 22px;
+      overflow-y: hidden;
     }
+    /* Composer: keep send button fixed height and bottom-aligned */
+    .composer .row { align-items: flex-end; }
+    .composer .row button { height: 44px; align-self: flex-end; flex: none; }
     .error {
       font-size: 12px;
       color: #b91c1c;
@@ -468,7 +473,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     }
     .consent.show { display: block; }
     .consent .small { font-size: 12px; opacity: 0.9; margin-top: 4px; }
-    .muted { font-size: 12px; opacity: 0.7; }
+    /* .muted (removed): was used for the footer version label */
   `;
 
   // In page layout, the widget occupies the whole screen. Lock page scroll so only the log scrolls in text mode.
@@ -734,6 +739,28 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   const textarea = document.createElement("textarea");
   textarea.placeholder = UI_TEXT.placeholder;
   textarea.disabled = false;
+  textarea.rows = 1;
+  function clamp(n: number, a: number, b: number) {
+    return Math.max(a, Math.min(b, n));
+  }
+  function adjustComposer() {
+    try {
+      const cs = window.getComputedStyle(textarea);
+      const lineHeight = Number.parseFloat(cs.lineHeight || "") || 22;
+      const padTop = Number.parseFloat(cs.paddingTop || "") || 10;
+      const padBottom = Number.parseFloat(cs.paddingBottom || "") || 10;
+      const minH = Math.round(lineHeight * 1 + padTop + padBottom);
+      const maxH = Math.round(lineHeight * 4 + padTop + padBottom);
+
+      // Keep send button height constant and bottom-aligned.
+      sendBtn.style.height = `${minH}px`;
+
+      textarea.style.height = "auto";
+      const want = clamp(textarea.scrollHeight, minH, maxH);
+      textarea.style.height = `${want}px`;
+      textarea.style.overflowY = textarea.scrollHeight > maxH ? "auto" : "hidden";
+    } catch {}
+  }
 
   const sendBtn = document.createElement("button");
   sendBtn.textContent = UI_TEXT.send;
@@ -742,14 +769,10 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   textRow.appendChild(sendBtn);
   composer.appendChild(textRow);
 
-  const meta = document.createElement("div");
-  meta.className = "muted";
-  meta.textContent = `withu widget v${WIDGET_VERSION}`;
-
   footer.appendChild(error);
   footer.appendChild(consent);
   footer.appendChild(footerControls);
-  footer.appendChild(meta);
+  // footer version label removed (not needed)
 
   panel.appendChild(header);
   panel.appendChild(hero);
@@ -933,6 +956,9 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       sendBtn.click();
     }
   });
+  textarea.addEventListener("input", () => adjustComposer());
+  // initial sizing
+  queueMicrotask(() => adjustComposer());
 
   consent.addEventListener("click", (ev) => {
     const el = ev.target as HTMLElement | null;
