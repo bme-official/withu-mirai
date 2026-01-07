@@ -1,4 +1,4 @@
-import { STORAGE_KEYS, VAD_CONFIG } from "./constants";
+import { STORAGE_KEYS } from "./constants";
 import { createApiClient } from "./api";
 import { createRecorder } from "./recorder";
 import { reduceState, type WidgetState } from "./stateMachine";
@@ -105,9 +105,6 @@ async function main() {
   const overrideAvatarUrl = script.dataset.avatarUrl || null;
   const userIdStorageKey = `${STORAGE_KEYS.userIdPrefix}${siteId}`;
   const layout = (script.dataset.layout || script.dataset.mode || "bubble") === "page" ? "page" : "bubble";
-  // Requirement: always use server-side TTS for reliable playback.
-  const ttsMode: "server" = "server";
-
   let state: WidgetState = "idle";
   let inFlight = false;
   let vad: ReturnType<typeof createVad> | null = null;
@@ -116,15 +113,64 @@ async function main() {
   let mode: "voice" | "text" = "voice";
   let ttsVoiceHint: string | null = null;
   let layoutMode: "bubble" | "page" = layout;
-  let muted = false;
+  let micMuted = false;
+  let speakerMuted = false;
+  let currentAudio: HTMLAudioElement | null = null;
+  let gotUserGesture = false;
+  let bootGreeted = false;
+  let intimacyLevel: number | null = null;
+
+  function stripEmojis(text: string): string {
+    try {
+      return text.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "").replace(/\s{2,}/g, " ").trim();
+    } catch {
+      return text.replace(/[\u2600-\u27BF]/g, "").replace(/\s{2,}/g, " ").trim();
+    }
+  }
+
+  function pickBootGreeting(level: number): string {
+    const lv = Math.max(1, Math.min(5, Math.round(level)));
+    const byLv: Record<number, string[]> = {
+      1: [
+        "Hi, I'm Mirai Aizawa. Want to chat for a minute?",
+        "Hey, it's Mirai. What would you like to talk about today?",
+        "Hi there. I'm Mirai Aizawa. Tell me what's on your mind.",
+      ],
+      2: [
+        "Hi again. I'm Mirai. How's your day going so far?",
+        "Hey, welcome back. Want to tell me what you're up to right now?",
+        "Hi. I'm here. What should we talk about first?",
+      ],
+      3: [
+        "Hey. It's good to see you again. What kind of mood are you in today?",
+        "Hi. I'm happy you're here. What are you thinking about?",
+        "Hey. Let's catch up. Anything fun or stressful happening today?",
+      ],
+      4: [
+        "Hi. I missed talking with you. How are you, honestly?",
+        "Hey. I'm here with you. Want to tell me what you need right now?",
+        "Hi. Let's do a quick check-in. What's been on your mind lately?",
+      ],
+      5: [
+        "Hey. I'm really happy you're here. Tell me how you're feeling today.",
+        "Hi. Let's talk. I want to hear what you've been going through.",
+        "Hey. I'm with you. What do you want to share first?",
+      ],
+    };
+    const arr = byLv[lv] ?? byLv[1];
+    const picked = arr[Math.floor(Math.random() * arr.length)] ?? arr[0]!;
+    return stripEmojis(picked);
+  }
 
   async function speakWithServerTts(text: string): Promise<{ ttsMs: number } | null> {
+    if (speakerMuted) return null;
     try {
       const t0 = performance.now();
       const blob = await api.ttsAudio(text);
       const url = URL.createObjectURL(blob);
       try {
         const audio = new Audio(url);
+        currentAudio = audio;
         audio.preload = "auto";
         audio.volume = 1.0;
         const playPromise = audio.play();
@@ -136,6 +182,7 @@ async function main() {
           audio.onerror = () => resolve();
         });
       } finally {
+        currentAudio = null;
         URL.revokeObjectURL(url);
       }
       return { ttsMs: msSince(t0) };
@@ -172,7 +219,8 @@ async function main() {
     } catch {}
     stream = null;
     try {
-      window.speechSynthesis?.cancel?.();
+      currentAudio?.pause?.();
+      currentAudio = null;
     } catch {}
     inFlight = false;
     setState("idle");
@@ -192,7 +240,8 @@ async function main() {
     } catch {}
     stream = null;
     try {
-      window.speechSynthesis?.cancel?.();
+      currentAudio?.pause?.();
+      currentAudio = null;
     } catch {}
     inFlight = false;
     setState("idle");
@@ -202,7 +251,7 @@ async function main() {
 
   async function speak(text: string) {
     // Ensure VAD is never running while speaking (stop first, then proceed).
-    if (muted) {
+    if (speakerMuted) {
       void api.log("tts_muted", { len: text.length });
       return null;
     }
@@ -211,6 +260,7 @@ async function main() {
 
   async function ensureVoiceListening(reason: string) {
     if (mode !== "voice") return;
+    if (micMuted) return;
     if (!hasConsent()) return;
     if (inFlight) return;
     if (state !== "idle") return;
@@ -268,6 +318,7 @@ async function main() {
           void api.log("llm_done", { llmMs: msSince(llmT0) });
 
           ui.appendMessage("assistant", assistantText);
+          intimacyLevel = intimacy?.level ?? intimacyLevel;
           ui.setIntimacy(intimacy?.level ?? null);
           setState(reduceState(state, { type: "LLM_DONE" }));
 
@@ -295,12 +346,37 @@ async function main() {
     await vad.start();
   }
 
+  async function maybeBootGreet(reason: string) {
+    if (bootGreeted) return;
+    if (!gotUserGesture) return;
+    if (!api.sessionId) return;
+    if (speakerMuted) return;
+
+    bootGreeted = true;
+    // Stop listening while greeting to avoid feedback.
+    try {
+      vad?.stop({ stopStream: false });
+    } catch {}
+    vad = null;
+
+    setState("speaking");
+    void api.log("boot_greet_start", { reason, intimacyLevel: intimacyLevel ?? null });
+    await speak(pickBootGreeting(intimacyLevel ?? 1));
+    void api.log("boot_greet_end", { reason });
+    setState("idle");
+    void ensureVoiceListening("boot_greet_done");
+  }
+
   const ui = createUi(
     {
     onToggleOpen(open) {
       if (open) void api.log("widget_open");
       ensureConsentUi();
         if (open) void ensureVoiceListening("open");
+    },
+    onUserGesture() {
+      gotUserGesture = true;
+      void maybeBootGreet("user_gesture");
     },
     onSelectMode(nextMode) {
       mode = nextMode;
@@ -316,21 +392,38 @@ async function main() {
       }
       ensureConsentUi();
     },
-    onToggleMute(next) {
-      muted = next;
-      ui.setMuted(muted);
-      if (muted) {
-        try {
-          window.speechSynthesis?.cancel?.();
-        } catch {}
+    onToggleMicMuted(next) {
+      micMuted = next;
+      ui.setMicMuted(micMuted);
+      localStorage.setItem(`${STORAGE_KEYS.micMutedPrefix}${siteId}`, micMuted ? "1" : "0");
+      void api.log("mic_mute_toggle", { muted: micMuted });
+      if (micMuted) {
+        stopVoicePipeline();
+      } else {
+        setState("idle");
+        void ensureVoiceListening("mic_unmute");
       }
-      void api.log("tts_mute_toggle", { muted });
+    },
+    onToggleSpeakerMuted(next) {
+      speakerMuted = next;
+      ui.setSpeakerMuted(speakerMuted);
+      localStorage.setItem(`${STORAGE_KEYS.ttsMutedPrefix}${siteId}`, speakerMuted ? "1" : "0");
+      void api.log("speaker_mute_toggle", { muted: speakerMuted });
+      if (speakerMuted) {
+        try {
+          currentAudio?.pause?.();
+          currentAudio = null;
+        } catch {}
+      } else {
+        void maybeBootGreet("speaker_unmute");
+      }
     },
     onAcceptConsent() {
       localStorage.setItem(STORAGE_KEYS.consent, "accepted");
       void api.log("consent_accept");
       ensureConsentUi();
         void ensureVoiceListening("consent_accept");
+        void maybeBootGreet("consent_accept");
     },
     onRejectConsent() {
       localStorage.setItem(STORAGE_KEYS.consent, "rejected");
@@ -364,6 +457,7 @@ async function main() {
         const { assistantText, intimacy } = await api.chat(text, "text");
         void api.log("llm_done", { llmMs: msSince(llmT0) });
         ui.appendMessage("assistant", assistantText);
+        intimacyLevel = intimacy?.level ?? intimacyLevel;
         ui.setIntimacy(intimacy?.level ?? null);
         setState("speaking");
 
@@ -407,14 +501,19 @@ async function main() {
     const storedUserId = localStorage.getItem(userIdStorageKey);
     const sess = await api.createSession(storedUserId);
     localStorage.setItem(userIdStorageKey, sess.userId);
+    intimacyLevel = sess.intimacy?.level ?? null;
     ui.setIntimacy(sess.intimacy?.level ?? null);
   } catch (e) {
     ui.setError("Failed to initialize session. Please reload the page.");
   }
 
-  // Helpful first message
-  ui.appendMessage("assistant", `Hi, I'm Mirai Aizawa. You can chat in Voice or Text mode.`);
-  ui.appendMessage("assistant", `(VAD: ${VAD_CONFIG.minSpeechMs}ms/${VAD_CONFIG.silenceMs}ms/${VAD_CONFIG.maxSpeechMs}ms)`);
+  // Load persisted mute states (per site)
+  micMuted = localStorage.getItem(`${STORAGE_KEYS.micMutedPrefix}${siteId}`) === "1";
+  speakerMuted = localStorage.getItem(`${STORAGE_KEYS.ttsMutedPrefix}${siteId}`) === "1";
+  ui.setMicMuted(micMuted);
+  ui.setSpeakerMuted(speakerMuted);
+  // Try greeting once we have both: user gesture + session
+  void maybeBootGreet("boot");
 
   // Auto-start voice listening when possible (no Start button).
   void ensureVoiceListening("boot");

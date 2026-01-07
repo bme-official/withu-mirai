@@ -26,6 +26,17 @@ function msSince(t0: number) {
   return Math.round(performance.now() - t0);
 }
 
+function stripEmojis(text: string): string {
+  // Conservative: remove emoji pictographs + variation selectors.
+  // This enforces "no emojis" even if the model outputs them.
+  try {
+    return text.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "").replace(/\s{2,}/g, " ").trim();
+  } catch {
+    // Fallback if unicode properties unsupported
+    return text.replace(/[\u2600-\u27BF]/g, "").replace(/\s{2,}/g, " ").trim();
+  }
+}
+
 function clampInt(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(n)));
 }
@@ -173,7 +184,8 @@ export async function POST(req: NextRequest) {
       presence_penalty: 0.2,
       frequency_penalty: 0.2,
     });
-    const assistantText = (chatResp.choices?.[0]?.message?.content ?? "").trim();
+    const assistantTextRaw = (chatResp.choices?.[0]?.message?.content ?? "").trim();
+    const assistantText = stripEmojis(assistantTextRaw);
     const llmMs = msSince(t0);
 
     if (!assistantText) return errorJson(502, "llm_empty");

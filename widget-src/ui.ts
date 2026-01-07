@@ -5,9 +5,11 @@ export type UiLayout = "bubble" | "page";
 
 export type UiCallbacks = {
   onToggleOpen(open: boolean): void;
+  onUserGesture(): void;
   onSelectMode(mode: "voice" | "text"): void;
   onSendText(text: string): void;
-  onToggleMute(muted: boolean): void;
+  onToggleMicMuted(muted: boolean): void;
+  onToggleSpeakerMuted(muted: boolean): void;
   onAcceptConsent(): void;
   onRejectConsent(): void;
 };
@@ -19,7 +21,8 @@ export type UiController = {
   setMode(mode: "voice" | "text"): void;
   setProfile(profile: { displayName: string; avatarUrl: string | null }): void;
   setIntimacy(level: number | null): void;
-  setMuted(muted: boolean): void;
+  setMicMuted(muted: boolean): void;
+  setSpeakerMuted(muted: boolean): void;
   appendMessage(role: "user" | "assistant", content: string): void;
   setError(msg: string | null): void;
   setConsentVisible(visible: boolean): void;
@@ -202,6 +205,15 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       box-shadow: 0 20px 45px rgba(0,0,0,0.12);
       background: linear-gradient(135deg, #111827, #6d28d9);
     }
+    .heroAvatar.listening {
+      border-color: rgba(16,185,129,0.65);
+      box-shadow: 0 0 0 6px rgba(16,185,129,0.16), 0 20px 45px rgba(0,0,0,0.12);
+      animation: pulse 1.35s ease-in-out infinite;
+    }
+    .heroAvatar.thinking {
+      border-color: rgba(59,130,246,0.65);
+      box-shadow: 0 0 0 6px rgba(59,130,246,0.14), 0 20px 45px rgba(0,0,0,0.12);
+    }
     .heroAvatar.speaking {
       border-color: rgba(109,40,217,0.65);
       box-shadow: 0 0 0 7px rgba(109,40,217,0.18), 0 20px 45px rgba(0,0,0,0.12);
@@ -210,18 +222,42 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     .heroAvatar img { width:100%; height:100%; object-fit:cover; display:block; }
     .heroName { font-weight: 800; font-size: 16px; }
     .heroSub { font-size: 12px; opacity: 0.7; text-align:center; }
-    .heroPills { display:flex; gap: 8px; align-items:center; }
-    .pill {
+    .heroStatusLine {
+      display:flex;
+      align-items:center;
+      gap: 8px;
       font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 9999px;
-      border: 1px solid rgba(0,0,0,0.10);
-      background: rgba(255,255,255,0.9);
+      font-weight: 700;
+      opacity: 0.8;
+      min-height: 18px;
     }
-    .pill.speaking {
-      border-color: rgba(109,40,217,0.25);
-      background: rgba(109,40,217,0.10);
-      color: #6d28d9;
+    .heroStatusDot {
+      width: 10px;
+      height: 10px;
+      border-radius: 9999px;
+      background: rgba(17,24,39,0.35);
+    }
+    .heroStatusDot.listening { background: rgba(16,185,129,0.85); }
+    .heroStatusDot.thinking { background: rgba(59,130,246,0.85); }
+    .heroStatusDot.speaking { background: rgba(109,40,217,0.85); }
+    .heroStatusText { letter-spacing: 0.01em; }
+    .dots {
+      display:inline-flex;
+      gap: 3px;
+      margin-left: 4px;
+      transform: translateY(1px);
+    }
+    .dots span {
+      width: 4px; height: 4px; border-radius: 9999px;
+      background: currentColor;
+      opacity: 0.25;
+      animation: dotPulse 1.1s infinite ease-in-out;
+    }
+    .dots span:nth-child(2) { animation-delay: 0.12s; }
+    .dots span:nth-child(3) { animation-delay: 0.24s; }
+    @keyframes dotPulse {
+      0%, 100% { opacity: 0.18; transform: translateY(0); }
+      50% { opacity: 0.9; transform: translateY(-1px); }
     }
     .avatar.speaking {
       border-color: rgba(109,40,217,0.55);
@@ -306,7 +342,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       line-height: 1;
     }
     .muteBtn svg { width: 16px; height: 16px; display:block; }
-    .muteBtn .mutedLabel { font-weight: 700; color: #ef4444; }
+    .muteBtn .mutedLabel { font-weight: 800; color: #ef4444; }
     .muteBtn.muted {
       border-color: rgba(239,68,68,0.35);
       background: rgba(239,68,68,0.08);
@@ -469,13 +505,19 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   right.style.display = "flex";
   right.style.alignItems = "center";
   right.style.gap = "8px";
-  const muteBtn = document.createElement("div");
-  muteBtn.className = "muteBtn";
-  muteBtn.setAttribute("role", "button");
-  muteBtn.setAttribute("tabindex", "0");
-  muteBtn.setAttribute("aria-label", "mute toggle");
+  const micMuteBtn = document.createElement("div");
+  micMuteBtn.className = "muteBtn";
+  micMuteBtn.setAttribute("role", "button");
+  micMuteBtn.setAttribute("tabindex", "0");
+  micMuteBtn.setAttribute("aria-label", "mic mute toggle");
+  const speakerMuteBtn = document.createElement("div");
+  speakerMuteBtn.className = "muteBtn";
+  speakerMuteBtn.setAttribute("role", "button");
+  speakerMuteBtn.setAttribute("tabindex", "0");
+  speakerMuteBtn.setAttribute("aria-label", "speaker mute toggle");
   right.appendChild(headerMode.root);
-  right.appendChild(muteBtn);
+  right.appendChild(micMuteBtn);
+  right.appendChild(speakerMuteBtn);
   right.appendChild(status);
 
   header.appendChild(title);
@@ -498,21 +540,27 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   heroSub.className = "heroSub";
   heroSub.textContent = UI_TEXT.heroPrompt;
 
-  const heroPills = document.createElement("div");
-  heroPills.className = "heroPills";
-  const heroStatus = document.createElement("div");
-  heroStatus.className = "pill";
-  heroStatus.textContent = "idle";
-  const heroMode = document.createElement("div");
-  heroMode.className = "pill";
-  heroMode.textContent = `${UI_TEXT.voice}/${UI_TEXT.text}`;
-  heroPills.appendChild(heroMode);
-  heroPills.appendChild(heroStatus);
+  const heroStatusLine = document.createElement("div");
+  heroStatusLine.className = "heroStatusLine";
+  const heroStatusDot = document.createElement("div");
+  heroStatusDot.className = "heroStatusDot";
+  const heroStatusText = document.createElement("div");
+  heroStatusText.className = "heroStatusText";
+  const heroStatusLabel = document.createElement("span");
+  heroStatusLabel.textContent = "Ready";
+  const dots = document.createElement("span");
+  dots.className = "dots";
+  dots.innerHTML = `<span></span><span></span><span></span>`;
+  dots.style.display = "none";
+  heroStatusText.appendChild(heroStatusLabel);
+  heroStatusText.appendChild(dots);
+  heroStatusLine.appendChild(heroStatusDot);
+  heroStatusLine.appendChild(heroStatusText);
 
   hero.appendChild(heroAvatar);
   hero.appendChild(heroName);
   hero.appendChild(heroSub);
-  hero.appendChild(heroPills);
+  hero.appendChild(heroStatusLine);
 
   const log = document.createElement("div");
   log.className = "log";
@@ -526,15 +574,26 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   // footer controls (for mobile layout): mute + mode toggle
   const footerControls = document.createElement("div");
   footerControls.className = "footerControls";
-  const footerMuteBtn = document.createElement("div");
-  footerMuteBtn.className = "muteBtn";
-  footerMuteBtn.setAttribute("role", "button");
-  footerMuteBtn.setAttribute("tabindex", "0");
-  footerMuteBtn.setAttribute("aria-label", "mute toggle");
+  const footerMuteGroup = document.createElement("div");
+  footerMuteGroup.style.display = "flex";
+  footerMuteGroup.style.alignItems = "center";
+  footerMuteGroup.style.gap = "8px";
+  const footerMicMuteBtn = document.createElement("div");
+  footerMicMuteBtn.className = "muteBtn";
+  footerMicMuteBtn.setAttribute("role", "button");
+  footerMicMuteBtn.setAttribute("tabindex", "0");
+  footerMicMuteBtn.setAttribute("aria-label", "mic mute toggle");
+  const footerSpeakerMuteBtn = document.createElement("div");
+  footerSpeakerMuteBtn.className = "muteBtn";
+  footerSpeakerMuteBtn.setAttribute("role", "button");
+  footerSpeakerMuteBtn.setAttribute("tabindex", "0");
+  footerSpeakerMuteBtn.setAttribute("aria-label", "speaker mute toggle");
+  footerMuteGroup.appendChild(footerMicMuteBtn);
+  footerMuteGroup.appendChild(footerSpeakerMuteBtn);
 
   const footerMode = createModeSwitch();
 
-  footerControls.appendChild(footerMuteBtn);
+  footerControls.appendChild(footerMuteGroup);
   footerControls.appendChild(footerMode.root);
 
   const error = document.createElement("div");
@@ -606,7 +665,8 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   });
 
   let currentMode: "voice" | "text" = "voice";
-  let muted = false;
+  let micMuted = false;
+  let speakerMuted = false;
   const micSvg = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M19 11a7 7 0 0 1-14 0" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -621,14 +681,31 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     <path d="M8 21h8" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M4 4l16 16" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
-  function renderMuteFor(el: HTMLElement) {
-    el.classList.toggle("muted", muted);
-    el.innerHTML = muted ? `${micOffSvg}<span class="mutedLabel">muted</span>` : micSvg;
-    el.setAttribute("aria-pressed", muted ? "true" : "false");
+  const speakerSvg = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M11 5 6 9H3v6h3l5 4V5Z" stroke="#111827" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M15.5 8.5a4.5 4.5 0 0 1 0 7" stroke="#111827" stroke-width="2" stroke-linecap="round"/>
+    <path d="M17.8 6.2a8 8 0 0 1 0 11.3" stroke="#111827" stroke-width="2" stroke-linecap="round"/>
+  </svg>`;
+  const speakerOffSvg = `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M11 5 6 9H3v6h3l5 4V5Z" stroke="#ef4444" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M4 4l16 16" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+  </svg>`;
+
+  function renderMicMuteFor(el: HTMLElement) {
+    el.classList.toggle("muted", micMuted);
+    el.innerHTML = micMuted ? `${micOffSvg}<span class="mutedLabel">${UI_TEXT.micMuted}</span>` : micSvg;
+    el.setAttribute("aria-pressed", micMuted ? "true" : "false");
   }
-  function renderMute() {
-    renderMuteFor(muteBtn);
-    renderMuteFor(footerMuteBtn);
+  function renderSpeakerMuteFor(el: HTMLElement) {
+    el.classList.toggle("muted", speakerMuted);
+    el.innerHTML = speakerMuted ? `${speakerOffSvg}<span class="mutedLabel">${UI_TEXT.speakerMuted}</span>` : speakerSvg;
+    el.setAttribute("aria-pressed", speakerMuted ? "true" : "false");
+  }
+  function renderMutes() {
+    renderMicMuteFor(micMuteBtn);
+    renderMicMuteFor(footerMicMuteBtn);
+    renderSpeakerMuteFor(speakerMuteBtn);
+    renderSpeakerMuteFor(footerSpeakerMuteBtn);
   }
   function applyVisibility() {
     const showHistory = currentMode === "text";
@@ -636,9 +713,11 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     panel.classList.toggle("voiceOnly", currentMode === "voice");
     // in voice mode, hide text input completely
     composer.style.display = currentMode === "text" ? "block" : "none";
-    muteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
-    footerMuteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
-    renderMute();
+    micMuteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
+    speakerMuteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
+    footerMicMuteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
+    footerSpeakerMuteBtn.style.display = currentMode === "voice" ? "inline-flex" : "none";
+    renderMutes();
   }
 
   function applyModeSwitchUi(mode: "voice" | "text") {
@@ -652,7 +731,6 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
 
   function setActiveMode(mode: "voice" | "text") {
     applyModeSwitchUi(mode);
-    heroMode.textContent = mode === "voice" ? UI_TEXT.modeVoice : UI_TEXT.modeText;
     currentMode = mode;
     applyVisibility();
     cb.onSelectMode(mode);
@@ -674,29 +752,55 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   wireSwitchKeyboard(headerMode.root, headerMode.input);
   wireSwitchKeyboard(footerMode.root, footerMode.input);
 
-  muteBtn.addEventListener("click", () => {
+  micMuteBtn.addEventListener("click", () => {
     if (currentMode !== "voice") return;
-    muted = !muted;
-    cb.onToggleMute(muted);
-    renderMute();
+    micMuted = !micMuted;
+    cb.onToggleMicMuted(micMuted);
+    renderMutes();
   });
-  muteBtn.addEventListener("keydown", (ev) => {
+  micMuteBtn.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
-      muteBtn.click();
+      micMuteBtn.click();
     }
   });
 
-  footerMuteBtn.addEventListener("click", () => {
+  footerMicMuteBtn.addEventListener("click", () => {
     if (currentMode !== "voice") return;
-    muted = !muted;
-    cb.onToggleMute(muted);
-    renderMute();
+    micMuted = !micMuted;
+    cb.onToggleMicMuted(micMuted);
+    renderMutes();
   });
-  footerMuteBtn.addEventListener("keydown", (ev) => {
+  footerMicMuteBtn.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
-      footerMuteBtn.click();
+      footerMicMuteBtn.click();
+    }
+  });
+
+  speakerMuteBtn.addEventListener("click", () => {
+    if (currentMode !== "voice") return;
+    speakerMuted = !speakerMuted;
+    cb.onToggleSpeakerMuted(speakerMuted);
+    renderMutes();
+  });
+  speakerMuteBtn.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      speakerMuteBtn.click();
+    }
+  });
+
+  footerSpeakerMuteBtn.addEventListener("click", () => {
+    if (currentMode !== "voice") return;
+    speakerMuted = !speakerMuted;
+    cb.onToggleSpeakerMuted(speakerMuted);
+    renderMutes();
+  });
+  footerSpeakerMuteBtn.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      footerSpeakerMuteBtn.click();
     }
   });
 
@@ -720,6 +824,22 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     if (act === "consent-reject") cb.onRejectConsent();
   });
 
+  // First user gesture hook (for autoplay-restricted audio)
+  let gestureFired = false;
+  function fireGesture() {
+    if (gestureFired) return;
+    gestureFired = true;
+    cb.onUserGesture();
+  }
+  wrap.addEventListener("pointerdown", fireGesture, { capture: true });
+  wrap.addEventListener(
+    "keydown",
+    (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") fireGesture();
+    },
+    { capture: true },
+  );
+
   return {
     mount() {
       if (document.getElementById(hostId)) return;
@@ -739,19 +859,32 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       status.textContent = s;
       status.classList.toggle("speaking", s === "speaking");
       avatar.classList.toggle("speaking", s === "speaking");
-      heroStatus.textContent = s;
-      heroStatus.classList.toggle("speaking", s === "speaking");
-      heroAvatar.classList.toggle("speaking", s === "speaking");
+      const voiceUi = (state: WidgetState) => {
+        heroAvatar.classList.toggle("speaking", state === "speaking");
+        heroAvatar.classList.toggle("listening", state === "listening");
+        heroAvatar.classList.toggle("thinking", state === "thinking");
+        heroStatusDot.classList.toggle("speaking", state === "speaking");
+        heroStatusDot.classList.toggle("listening", state === "listening");
+        heroStatusDot.classList.toggle("thinking", state === "thinking");
+        const txt = state === "listening" ? "Listening" : state === "thinking" ? "Thinking" : state === "speaking" ? "Speaking" : "Ready";
+        heroStatusLabel.textContent = txt;
+        // dots for thinking/speaking
+        dots.style.display = state === "thinking" || state === "speaking" ? "inline-flex" : "none";
+      };
+      voiceUi(s);
     },
     setMode(mode) {
       currentMode = mode;
       applyModeSwitchUi(mode);
-      heroMode.textContent = mode === "voice" ? UI_TEXT.modeVoice : UI_TEXT.modeText;
       applyVisibility();
     },
-    setMuted(next) {
-      muted = next;
-      renderMute();
+    setMicMuted(next) {
+      micMuted = next;
+      renderMutes();
+    },
+    setSpeakerMuted(next) {
+      speakerMuted = next;
+      renderMutes();
     },
     setProfile(profile) {
       currentDisplayName = profile.displayName;

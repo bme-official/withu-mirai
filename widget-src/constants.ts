@@ -14,6 +14,7 @@ export const STORAGE_KEYS = {
   consent: "withu_voice_consent_v1",
   userIdPrefix: "withu_user_id_v1:",
   ttsMutedPrefix: "withu_tts_muted_v1:",
+  micMutedPrefix: "withu_mic_muted_v1:",
 } as const;
 
 export const UI_TEXT = {
@@ -33,6 +34,8 @@ export const UI_TEXT = {
   consentAccept: "I agree",
   consentReject: "No thanks",
   intimacyLabel: "Intimacy",
+  micMuted: "mic muted",
+  speakerMuted: "speaker muted",
 } as const;
 
 
