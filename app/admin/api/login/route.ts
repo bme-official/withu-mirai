@@ -3,6 +3,10 @@ export const runtime = "nodejs";
 import type { NextRequest } from "next/server";
 import { createAdminSessionCookie, adminPasswordMatches, isAdminEnabled } from "@/lib/server/adminAuth";
 
+export async function GET(req: NextRequest) {
+  return Response.redirect(new URL("/admin/login", req.url), 303);
+}
+
 export async function POST(req: NextRequest) {
   if (!isAdminEnabled()) {
     return Response.redirect(new URL("/admin/login?error=admin_disabled", req.url), 303);
