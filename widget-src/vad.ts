@@ -164,9 +164,8 @@ export function createVad(stream: MediaStream, recorder: RecorderLike, cb: VadCa
       }
     },
     stop(opts) {
+      if (!st.running) return;
       const stopStream = opts?.stopStream !== false;
-      // Allow stopping even if not running (e.g. after a speech segment),
-      // to ensure recorder/audio graph are cleaned up.
       st.running = false;
       if (st.rafId) cancelAnimationFrame(st.rafId);
       st.rafId = null;

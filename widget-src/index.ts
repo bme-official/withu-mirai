@@ -117,7 +117,9 @@ async function main() {
   let speakerMuted = false;
   let currentAudio: HTMLAudioElement | null = null;
   let gotUserGesture = false;
-  let bootGreeted = false;
+  let bootGreetingText: string | null = null;
+  let bootGreetingDisplayed = false;
+  let bootGreetingSpoken = false;
   let intimacyLevel: number | null = null;
 
   function stripEmojis(text: string): string {
@@ -266,6 +268,8 @@ async function main() {
     if (!hasConsent()) return;
     if (inFlight) return;
     if (state !== "idle") return;
+    // Requirement: greet first, then start listening.
+    if (!bootGreetingSpoken) return;
 
     // ensure mic stream
     if (!stream) {
@@ -357,12 +361,20 @@ async function main() {
   }
 
   async function maybeBootGreet(reason: string) {
-    if (bootGreeted) return;
-    if (!gotUserGesture) return;
+    if (bootGreetingSpoken) return;
     if (!api.sessionId) return;
     if (speakerMuted) return;
 
-    bootGreeted = true;
+    if (!bootGreetingText) bootGreetingText = pickBootGreeting(intimacyLevel ?? 1);
+    if (!bootGreetingDisplayed) {
+      bootGreetingDisplayed = true;
+      // Requirement: keep the greeting in the chat log.
+      ui.appendMessage("assistant", bootGreetingText);
+    }
+
+    // Audio autoplay may be blocked until a user gesture; try now, retry on gesture.
+    if (!gotUserGesture) return;
+
     // Stop listening while greeting to avoid feedback.
     try {
       vad?.stop({ stopStream: false });
@@ -371,8 +383,9 @@ async function main() {
 
     setState("speaking");
     void api.log("boot_greet_start", { reason, intimacyLevel: intimacyLevel ?? null });
-    await speak(pickBootGreeting(intimacyLevel ?? 1));
-    void api.log("boot_greet_end", { reason });
+    const res = await speak(bootGreetingText);
+    void api.log("boot_greet_end", { reason, ok: Boolean(res) });
+    bootGreetingSpoken = true;
     setState("idle");
     void ensureVoiceListening("boot_greet_done");
   }
@@ -383,8 +396,8 @@ async function main() {
       if (open) void api.log("widget_open");
       ensureConsentUi();
       if (open) {
-        if (bootGreeted) void ensureVoiceListening("open");
-        else void maybeBootGreet("open");
+        void maybeBootGreet("open");
+        void ensureVoiceListening("open");
       }
     },
     onUserGesture() {
@@ -401,8 +414,8 @@ async function main() {
       } else {
         // voice mode: keep idle; start is enabled only after consent
         setState("idle");
-        if (bootGreeted) void ensureVoiceListening("mode_switch");
-        else void maybeBootGreet("mode_switch");
+        void maybeBootGreet("mode_switch");
+        void ensureVoiceListening("mode_switch");
       }
       ensureConsentUi();
     },
@@ -415,8 +428,8 @@ async function main() {
         stopVoicePipeline({ keepTts: true, keepState: state === "speaking" });
       } else {
         setState("idle");
-        if (bootGreeted) void ensureVoiceListening("mic_unmute");
-        else void maybeBootGreet("mic_unmute");
+        void maybeBootGreet("mic_unmute");
+        void ensureVoiceListening("mic_unmute");
       }
     },
     onToggleSpeakerMuted(next) {
@@ -526,8 +539,8 @@ async function main() {
   speakerMuted = localStorage.getItem(`${STORAGE_KEYS.ttsMutedPrefix}${siteId}`) === "1";
   ui.setMicMuted(micMuted);
   ui.setSpeakerMuted(speakerMuted);
-  // Start with a short greeting (requires a user gesture due to autoplay restrictions).
-  // After greeting, we will begin listening automatically if consent is granted.
+  // Start with a short greeting immediately (also appended to log).
+  // Voice playback may require a user gesture; we retry on first gesture.
   void maybeBootGreet("boot");
 }
 

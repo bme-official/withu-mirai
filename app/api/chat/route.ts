@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
     await insertMessage({ sessionId, role: "user", content: userText });
 
     // Latency tuning: shorter history reduces token usage and speeds up responses.
-    const historyLimit = 12;
+    const historyLimit = 8;
     const history = userId ? await listRecentMessagesForUser(userId, historyLimit) : await listRecentMessages(sessionId, historyLimit);
     const model = getChatModel();
     const intimacyModel = getIntimacyModel();
@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
     const chatResp = await getOpenAI().chat.completions.create({
       model,
       messages: chatMessages,
-      max_tokens: 220,
+      max_tokens: 160,
       temperature: 0.45,
       presence_penalty: 0.2,
       frequency_penalty: 0.2,
