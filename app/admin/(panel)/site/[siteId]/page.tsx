@@ -68,20 +68,32 @@ export default async function AdminSitePage({
       ) : null}
 
       <form className="flex flex-col gap-6" action={`/admin/api/site/${encodeURIComponent(siteId)}`} method="post">
-        <div className="rounded-xl border bg-white p-4">
+        <div className="rounded-xl border bg-white p-4 text-zinc-900">
           <div className="mb-3 text-sm font-semibold">Profile</div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <label className="text-sm">
               Display name
-              <input className="mt-1 w-full rounded-lg border px-3 py-2" name="displayName" defaultValue={prof?.display_name ?? ""} />
+              <input
+                className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-zinc-900 placeholder:text-zinc-400"
+                name="displayName"
+                defaultValue={prof?.display_name ?? ""}
+              />
             </label>
             <label className="text-sm">
               Avatar URL
-              <input className="mt-1 w-full rounded-lg border px-3 py-2" name="avatarUrl" defaultValue={prof?.avatar_url ?? ""} />
+              <input
+                className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-zinc-900 placeholder:text-zinc-400"
+                name="avatarUrl"
+                defaultValue={prof?.avatar_url ?? ""}
+              />
             </label>
             <label className="text-sm md:col-span-2">
               TTS hint (optional)
-              <input className="mt-1 w-full rounded-lg border px-3 py-2" name="ttsVoiceHint" defaultValue={prof?.tts_voice_hint ?? ""} />
+              <input
+                className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-zinc-900 placeholder:text-zinc-400"
+                name="ttsVoiceHint"
+                defaultValue={prof?.tts_voice_hint ?? ""}
+              />
               <div className="mt-1 text-xs text-zinc-500">
                 For OpenAI TTS override, you can set: <code className="rounded bg-zinc-100 px-1">voice=shimmer</code>,{" "}
                 <code className="rounded bg-zinc-100 px-1">model=tts-1-hd</code>, etc.
@@ -90,33 +102,53 @@ export default async function AdminSitePage({
           </div>
         </div>
 
-        <div className="rounded-xl border bg-white p-4">
+        <div className="rounded-xl border bg-white p-4 text-zinc-900">
           <div className="mb-2 text-sm font-semibold">Persona prompt (server-only)</div>
           <div className="text-xs text-zinc-500">
             This is appended to the system prompt. Use it to control profile, tone, rules (e.g. no emojis), and boundaries.
           </div>
-          <textarea className="mt-2 w-full rounded-lg border px-3 py-2 font-mono text-xs" name="personaPrompt" rows={10} defaultValue={prof?.persona_prompt ?? ""} />
+          <textarea
+            className="mt-2 w-full rounded-lg border bg-white px-3 py-2 font-mono text-xs text-zinc-900 placeholder:text-zinc-400"
+            name="personaPrompt"
+            rows={10}
+            defaultValue={prof?.persona_prompt ?? ""}
+          />
         </div>
 
-        <div className="rounded-xl border bg-white p-4">
+        <div className="rounded-xl border bg-white p-4 text-zinc-900">
           <div className="mb-2 text-sm font-semibold">Greeting templates (JSON)</div>
           <div className="text-xs text-zinc-500">
             Example:
             <code className="ml-2 rounded bg-zinc-100 px-1">{"{\"1\":[\"Hi...\"],\"2\":[\"Welcome back...\"]}"}</code>
           </div>
-          <textarea className="mt-2 w-full rounded-lg border px-3 py-2 font-mono text-xs" name="greetingTemplates" rows={10} defaultValue={prettyJson((prof as any)?.greeting_templates)} />
+          <textarea
+            className="mt-2 w-full rounded-lg border bg-white px-3 py-2 font-mono text-xs text-zinc-900 placeholder:text-zinc-400"
+            name="greetingTemplates"
+            rows={10}
+            defaultValue={prettyJson((prof as any)?.greeting_templates)}
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div className="rounded-xl border bg-white p-4">
+          <div className="rounded-xl border bg-white p-4 text-zinc-900">
             <div className="mb-2 text-sm font-semibold">Chat config (JSON)</div>
             <div className="text-xs text-zinc-500">For example: max reply length, style toggles, etc.</div>
-            <textarea className="mt-2 w-full rounded-lg border px-3 py-2 font-mono text-xs" name="chatConfig" rows={10} defaultValue={prettyJson((prof as any)?.chat_config)} />
+            <textarea
+              className="mt-2 w-full rounded-lg border bg-white px-3 py-2 font-mono text-xs text-zinc-900 placeholder:text-zinc-400"
+              name="chatConfig"
+              rows={10}
+              defaultValue={prettyJson((prof as any)?.chat_config)}
+            />
           </div>
-          <div className="rounded-xl border bg-white p-4">
+          <div className="rounded-xl border bg-white p-4 text-zinc-900">
             <div className="mb-2 text-sm font-semibold">CTA / external services (JSON)</div>
             <div className="text-xs text-zinc-500">For example: Patreon links, when to mention, etc.</div>
-            <textarea className="mt-2 w-full rounded-lg border px-3 py-2 font-mono text-xs" name="ctaConfig" rows={10} defaultValue={prettyJson((prof as any)?.cta_config)} />
+            <textarea
+              className="mt-2 w-full rounded-lg border bg-white px-3 py-2 font-mono text-xs text-zinc-900 placeholder:text-zinc-400"
+              name="ctaConfig"
+              rows={10}
+              defaultValue={prettyJson((prof as any)?.cta_config)}
+            />
           </div>
         </div>
 

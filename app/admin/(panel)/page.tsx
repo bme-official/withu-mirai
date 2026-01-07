@@ -25,11 +25,11 @@ export default async function AdminHome() {
         </form>
       </div>
 
-      <div className="rounded-xl border bg-white p-4">
+      <div className="rounded-xl border bg-white p-4 text-zinc-900">
         <div className="mb-2 text-sm font-semibold">Create / open a site</div>
         <form className="flex flex-col gap-2 sm:flex-row" action="/admin/api/site/new" method="post">
           <input
-            className="w-full rounded-lg border px-3 py-2 text-sm"
+            className="w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400"
             name="siteId"
             placeholder="site_id (e.g. mirai-aizawa-com)"
             required
@@ -41,7 +41,7 @@ export default async function AdminHome() {
         <div className="mt-2 text-xs text-zinc-500">This will create the row if it does not exist.</div>
       </div>
 
-      <div className="rounded-xl border bg-white">
+      <div className="rounded-xl border bg-white text-zinc-900">
         <div className="border-b p-4 text-sm font-semibold">Sites</div>
         {loadError ? (
           <div className="border-b bg-red-50 p-4 text-sm text-red-800">

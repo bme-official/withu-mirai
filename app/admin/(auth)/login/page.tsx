@@ -30,7 +30,7 @@ export default async function AdminLoginPage({
         <label className="text-sm font-medium">
           Password
           <input
-            className="mt-1 w-full rounded-lg border px-3 py-2"
+            className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-zinc-900 placeholder:text-zinc-400"
             name="password"
             type="password"
             autoComplete="current-password"
