@@ -147,7 +147,10 @@ async function main() {
     }
   }
 
-  async function speakWithServerTts(text: string): Promise<{ ttsMs: number } | null> {
+  async function speakWithServerTts(
+    text: string,
+    stream?: { setProgress(ratio: number): void; finish(): void },
+  ): Promise<{ ttsMs: number } | null> {
     if (speakerMuted) return null;
     try {
       const t0 = performance.now();
@@ -180,11 +183,25 @@ async function main() {
         const audio = new Audio(url);
         currentAudio = audio;
         let done = false;
+        let raf: number | null = null;
         audio.preload = "auto";
         audio.volume = 1.0;
         const playPromise = audio.play();
         if (playPromise && typeof (playPromise as any).catch === "function") {
           await playPromise;
+        }
+        // Stream text display along with playback progress (best-effort).
+        if (stream) {
+          const estDur = Math.max(1.2, text.length / 14); // ~14 chars/sec baseline
+          const tick = () => {
+            if (done) return;
+            const d = Number(audio.duration);
+            const dur = Number.isFinite(d) && d > 0 ? d : estDur;
+            const ratio = dur > 0 ? Math.max(0, Math.min(1, audio.currentTime / dur)) : 0;
+            stream.setProgress(ratio);
+            raf = requestAnimationFrame(tick);
+          };
+          raf = requestAnimationFrame(tick);
         }
         // Enable barge-in while speaking (voice mode only).
         startBargeInMonitor();
@@ -192,6 +209,11 @@ async function main() {
           const finish = () => {
             if (done) return;
             done = true;
+            if (raf) cancelAnimationFrame(raf);
+            raf = null;
+            try {
+              stream?.finish();
+            } catch {}
             resolve();
           };
           // allow external interruption (barge-in)
@@ -276,13 +298,13 @@ async function main() {
     void api.log("error", { phase, message: message ?? null });
   }
 
-  async function speak(text: string) {
+  async function speak(text: string, stream?: { setProgress(ratio: number): void; finish(): void }) {
     // Ensure VAD is never running while speaking (stop first, then proceed).
     if (speakerMuted) {
       void api.log("tts_muted", { len: text.length });
       return null;
     }
-    return await speakWithServerTts(text);
+    return await speakWithServerTts(text, stream);
   }
 
   async function ensureVoiceListening(reason: string) {
@@ -360,14 +382,14 @@ async function main() {
           const { assistantText, intimacy } = await api.chat(userText, "voice");
           void api.log("llm_done", { llmMs: msSince(llmT0) });
 
-          ui.appendMessage("assistant", assistantText);
+          const streamMsg = ui.appendAssistantStreaming(assistantText);
           intimacyLevel = intimacy?.level ?? intimacyLevel;
           ui.setIntimacy(intimacy?.level ?? null);
           setState(reduceState(state, { type: "LLM_DONE" }));
 
           const ttsT0 = performance.now();
           void api.log("tts_start");
-          await speak(assistantText);
+          await speak(assistantText, streamMsg);
           void api.log("tts_end", { ttsMs: msSince(ttsT0) });
 
           setState(reduceState(state, { type: "TTS_END" }));
@@ -604,13 +626,13 @@ async function main() {
         const llmT0 = performance.now();
         const { assistantText, intimacy } = await api.chat(text, "text");
         void api.log("llm_done", { llmMs: msSince(llmT0) });
-        ui.appendMessage("assistant", assistantText);
+        const streamMsg = ui.appendAssistantStreaming(assistantText);
         intimacyLevel = intimacy?.level ?? intimacyLevel;
         ui.setIntimacy(intimacy?.level ?? null);
         setState("speaking");
 
         void api.log("tts_start");
-        const res = await speak(assistantText);
+        const res = await speak(assistantText, streamMsg);
         void api.log("tts_end", { ttsMs: res?.ttsMs ?? 0 });
       } catch (e) {
         stopAll("chat_text", `Chat failed: ${safeErr(e)}`);

@@ -38,8 +38,17 @@ export async function POST(req: NextRequest) {
     const prof = auth.siteId ? await getSiteProfile(auth.siteId).catch(() => null) : null;
     const provider = String((prof as any)?.tts_provider ?? "openai").toLowerCase();
 
-    // Latency tuning: keep TTS input reasonably short.
-    const input = String(text || "").slice(0, 900);
+    // Latency tuning: keep TTS input short by default.
+    // Can be overridden via site_profiles.chat_config.tts.max_chars.
+    const maxChars =
+      Math.max(
+        80,
+        Math.min(
+          1200,
+          Number((prof as any)?.chat_config?.tts?.max_chars ?? 520),
+        ),
+      ) || 520;
+    const input = String(text || "").slice(0, maxChars);
     if (!input.trim()) return json({ ok: false, error: "empty_text" }, { status: 400, headers: cors });
 
     const t0 = performance.now();

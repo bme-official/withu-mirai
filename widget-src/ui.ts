@@ -25,6 +25,7 @@ export type UiController = {
   setMicMuted(muted: boolean): void;
   setSpeakerMuted(muted: boolean): void;
   appendMessage(role: "user" | "assistant", content: string): void;
+  appendAssistantStreaming(content: string): { setProgress(ratio: number): void; finish(): void };
   setError(msg: string | null): void;
   setConsentVisible(visible: boolean): void;
   setTextFallbackEnabled(enabled: boolean): void;
@@ -507,6 +508,31 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     }
   }
 
+  // In page layout, use visualViewport/innerHeight to keep footer controls visible when mobile browser UI changes.
+  let cleanupVh: (() => void) | null = null;
+  function updateWithuVh() {
+    if (layout !== "page") return;
+    try {
+      const h = Math.round((window.visualViewport?.height ?? window.innerHeight ?? 0) || 0);
+      if (h > 0) host.style.setProperty("--withu-vh", `${h}px`);
+    } catch {}
+  }
+  function setupVhListeners() {
+    if (layout !== "page") return () => {};
+    const on = () => updateWithuVh();
+    const vv = window.visualViewport;
+    window.addEventListener("resize", on, { passive: true });
+    window.addEventListener("orientationchange", on, { passive: true });
+    vv?.addEventListener("resize", on as any, { passive: true } as any);
+    vv?.addEventListener("scroll", on as any, { passive: true } as any);
+    return () => {
+      window.removeEventListener("resize", on as any);
+      window.removeEventListener("orientationchange", on as any);
+      vv?.removeEventListener("resize", on as any);
+      vv?.removeEventListener("scroll", on as any);
+    };
+  }
+
   const wrap = document.createElement("div");
   wrap.className = layout === "page" ? "page" : "";
 
@@ -943,6 +969,9 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
         open = true;
         panel.classList.add("open");
         lockPageScroll(true);
+        updateWithuVh();
+        cleanupVh?.();
+        cleanupVh = setupVhListeners();
       }
       applyVisibility();
     },
@@ -1041,6 +1070,27 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
       div.textContent = content;
       log.appendChild(div);
       scrollToBottom();
+    },
+    appendAssistantStreaming(content) {
+      const full = String(content || "");
+      const div = document.createElement("div");
+      div.className = "msg assistant";
+      div.textContent = "";
+      log.appendChild(div);
+      scrollToBottom();
+      return {
+        setProgress(ratio) {
+          const r = Math.max(0, Math.min(1, ratio));
+          const n = Math.max(0, Math.min(full.length, Math.floor(full.length * r)));
+          const next = full.slice(0, n);
+          if (div.textContent !== next) div.textContent = next;
+          scrollToBottom();
+        },
+        finish() {
+          div.textContent = full;
+          scrollToBottom();
+        },
+      };
     },
     setError(msg) {
       if (!msg) {
