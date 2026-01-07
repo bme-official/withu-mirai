@@ -79,6 +79,9 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     .page .bubble { display: none !important; }
     .page .panel {
       width: 100vw;
+      /* Prefer dynamic viewport units on mobile browsers */
+      height: 100dvh;
+      height: 100svh;
       height: 100vh;
       border-radius: 0;
       margin-bottom: 0;
@@ -462,6 +465,43 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     .consent .small { font-size: 12px; opacity: 0.9; margin-top: 4px; }
     .muted { font-size: 12px; opacity: 0.7; }
   `;
+
+  // In page layout, the widget occupies the whole screen. Lock page scroll so only the log scrolls in text mode.
+  const prevScrollLock = {
+    htmlOverflow: "",
+    htmlHeight: "",
+    bodyOverflow: "",
+    bodyHeight: "",
+    bodyOverscroll: "",
+    bodyTouchAction: "",
+  };
+  function lockPageScroll(enable: boolean) {
+    if (typeof document === "undefined") return;
+    const html = document.documentElement;
+    const body = document.body;
+    if (!html || !body) return;
+    if (enable) {
+      prevScrollLock.htmlOverflow = html.style.overflow || "";
+      prevScrollLock.htmlHeight = html.style.height || "";
+      prevScrollLock.bodyOverflow = body.style.overflow || "";
+      prevScrollLock.bodyHeight = body.style.height || "";
+      prevScrollLock.bodyOverscroll = (body.style as any).overscrollBehavior || "";
+      prevScrollLock.bodyTouchAction = (body.style as any).touchAction || "";
+      html.style.overflow = "hidden";
+      html.style.height = "100%";
+      body.style.overflow = "hidden";
+      body.style.height = "100%";
+      (body.style as any).overscrollBehavior = "none";
+      (body.style as any).touchAction = "none";
+    } else {
+      html.style.overflow = prevScrollLock.htmlOverflow;
+      html.style.height = prevScrollLock.htmlHeight;
+      body.style.overflow = prevScrollLock.bodyOverflow;
+      body.style.height = prevScrollLock.bodyHeight;
+      (body.style as any).overscrollBehavior = prevScrollLock.bodyOverscroll;
+      (body.style as any).touchAction = prevScrollLock.bodyTouchAction;
+    }
+  }
 
   const wrap = document.createElement("div");
   wrap.className = layout === "page" ? "page" : "";
@@ -898,6 +938,7 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
         // page layout is always open
         open = true;
         panel.classList.add("open");
+        lockPageScroll(true);
       }
       applyVisibility();
     },
