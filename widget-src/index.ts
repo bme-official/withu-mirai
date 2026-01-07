@@ -372,9 +372,6 @@ async function main() {
       ui.appendMessage("assistant", bootGreetingText);
     }
 
-    // Audio autoplay may be blocked until a user gesture; try now, retry on gesture.
-    if (!gotUserGesture) return;
-
     // Stop listening while greeting to avoid feedback.
     try {
       vad?.stop({ stopStream: false });
@@ -385,6 +382,11 @@ async function main() {
     void api.log("boot_greet_start", { reason, intimacyLevel: intimacyLevel ?? null });
     const res = await speak(bootGreetingText);
     void api.log("boot_greet_end", { reason, ok: Boolean(res) });
+    // If autoplay is blocked (no user gesture yet), res can be null; we'll retry on gesture.
+    if (!res) {
+      setState("idle");
+      return;
+    }
     bootGreetingSpoken = true;
     setState("idle");
     void ensureVoiceListening("boot_greet_done");
