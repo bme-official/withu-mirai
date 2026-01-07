@@ -7,8 +7,8 @@ export type Recorder = {
 
 function pickMimeType(): string | undefined {
   const candidates = [
-    "audio/webm;codecs=opus",
     "audio/webm",
+    "audio/webm;codecs=opus",
     "audio/ogg;codecs=opus",
   ];
   for (const mt of candidates) {
@@ -23,6 +23,7 @@ export function createRecorder(stream: MediaStream): Recorder {
   let recording = false;
 
   const mimeType = pickMimeType();
+  const blobType = (mimeType ?? "audio/webm").split(";")[0] || "audio/webm";
 
   function ensureMr() {
     if (mr) return mr;
@@ -46,13 +47,13 @@ export function createRecorder(stream: MediaStream): Recorder {
     },
     async stop() {
       if (!recording) {
-        const empty = new Blob([], { type: mimeType ?? "audio/webm" });
+        const empty = new Blob([], { type: blobType });
         return { blob: empty, sizeBytes: 0 };
       }
       recording = false;
       const r = ensureMr();
       if (r.state === "inactive") {
-        const blob = new Blob(chunks, { type: mimeType ?? "audio/webm" });
+        const blob = new Blob(chunks, { type: blobType });
         return { blob, sizeBytes: blob.size };
       }
       await new Promise<void>((resolve) => {
@@ -63,7 +64,7 @@ export function createRecorder(stream: MediaStream): Recorder {
           resolve();
         }
       });
-      const blob = new Blob(chunks, { type: mimeType ?? "audio/webm" });
+      const blob = new Blob(chunks, { type: blobType });
       return { blob, sizeBytes: blob.size };
     },
     isRecording() {

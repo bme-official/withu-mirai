@@ -13,6 +13,22 @@ function msSince(t0: number) {
   return Math.round(performance.now() - t0);
 }
 
+function normalizeAudio(input: { filename: string; mimeType: string | null }): { filename: string; mimeType: string } {
+  const name = input.filename || "audio.webm";
+  const rawType = (input.mimeType || "").toLowerCase();
+  const baseType = rawType.split(";")[0].trim();
+  const ext = name.split(".").pop()?.toLowerCase() || "";
+
+  // Prefer known safe types.
+  if (baseType === "audio/webm" || ext === "webm") return { filename: "audio.webm", mimeType: "audio/webm" };
+  if (baseType === "audio/ogg" || baseType === "audio/oga" || ext === "ogg" || ext === "oga")
+    return { filename: "audio.ogg", mimeType: "audio/ogg" };
+  if (baseType === "audio/wav" || ext === "wav") return { filename: "audio.wav", mimeType: "audio/wav" };
+
+  // Fallback: keep webm (supported by Whisper) and hope container matches.
+  return { filename: "audio.webm", mimeType: "audio/webm" };
+}
+
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
   const cors = corsHeaders(req);
@@ -24,27 +40,42 @@ export async function POST(req: NextRequest) {
     const sessionToken = String(fd.get("sessionToken") || "");
     const audio = fd.get("audio");
 
-    if (!sessionId || !/^[0-9a-f-]{36}$/i.test(sessionId)) return errorJson(400, "invalid_sessionId");
-    if (!sessionToken || sessionToken.length < 16) return errorJson(400, "invalid_sessionToken");
-    if (!(audio instanceof File)) return errorJson(400, "missing_audio");
+    if (!sessionId || !/^[0-9a-f-]{36}$/i.test(sessionId)) return json({ ok: false, error: "invalid_sessionId" }, { status: 400, headers: cors });
+    if (!sessionToken || sessionToken.length < 16) return json({ ok: false, error: "invalid_sessionToken" }, { status: 400, headers: cors });
+    if (!(audio instanceof File)) return json({ ok: false, error: "missing_audio" }, { status: 400, headers: cors });
 
     // very rough DoS protection
-    if (audio.size > 15 * 1024 * 1024) return errorJson(413, "file_too_large");
+    if (audio.size > 15 * 1024 * 1024) return json({ ok: false, error: "file_too_large" }, { status: 413, headers: cors });
+    // Prevent sending tiny/empty audio blobs to Whisper (often causes invalid format errors)
+    if (audio.size < 1200) return json({ ok: false, error: "audio_too_small" }, { status: 400, headers: cors });
 
     rateLimitOrThrow(`asr_session:${sessionId}`, 25, 60_000);
     await assertSessionToken(sessionId, sessionToken);
 
+    const norm = normalizeAudio({ filename: audio.name || "audio.webm", mimeType: audio.type || null });
     const buf = Buffer.from(await audio.arrayBuffer());
-    const file = await toFile(buf, audio.name || "audio.webm", { type: audio.type || "audio/webm" });
+    const file = await toFile(buf, norm.filename, { type: norm.mimeType });
 
     const t0 = performance.now();
-    const tr = await getOpenAI().audio.transcriptions.create({
-      model: "whisper-1",
-      file,
-    });
+    let tr: { text?: string } | null = null;
+    try {
+      tr = await getOpenAI().audio.transcriptions.create({
+        model: "whisper-1",
+        file,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/invalid file format/i.test(msg)) {
+        return json(
+          { ok: false, error: "invalid_audio_format", message: msg, mimeType: norm.mimeType, filename: norm.filename },
+          { status: 400, headers: cors },
+        );
+      }
+      throw e;
+    }
     const asrMs = msSince(t0);
 
-    const text = (tr.text || "").trim();
+    const text = (tr?.text || "").trim();
     await insertEvents(sessionId, [{ type: "asr_done", meta: { asrMs } }]);
 
     return json({ ok: true, text }, { status: 200, headers: cors });

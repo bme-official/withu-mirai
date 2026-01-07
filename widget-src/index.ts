@@ -301,6 +301,14 @@ async function main() {
         void api.log("vad_speech_end", { durationMs: Math.round(durationMs), sizeBytes });
 
         try {
+          // Guard: ignore tiny blobs (can cause Whisper "invalid file format")
+          if (sizeBytes < 1200) {
+            void api.log("asr_skip_small_blob", { sizeBytes, durationMs: Math.round(durationMs), type: (blob as any)?.type ?? null });
+            inFlight = false;
+            setState("idle");
+            void ensureVoiceListening("small_blob_skip");
+            return;
+          }
           const asrT0 = performance.now();
           const { text } = await api.asr(blob);
           void api.log("asr_done", { asrMs: msSince(asrT0) });

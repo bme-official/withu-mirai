@@ -89,10 +89,12 @@ export function createApiClient(baseUrl: string, siteId: string): ApiClient {
     },
     async asr(audio: Blob) {
       if (!state.sessionId || !state.sessionToken) throw new Error("missing session");
+      const t = String((audio as any)?.type ?? "").toLowerCase();
+      const ext = t.includes("ogg") || t.includes("oga") ? "ogg" : t.includes("wav") ? "wav" : "webm";
       const fd = new FormData();
       fd.append("sessionId", state.sessionId);
       fd.append("sessionToken", state.sessionToken);
-      fd.append("audio", audio, "audio.webm");
+      fd.append("audio", audio, `audio.${ext}`);
       const res = await fetch(`${baseUrl}/api/asr`, { method: "POST", body: fd });
       const text = await res.text();
       if (!res.ok) throw new Error(`HTTP ${res.status} /api/asr ${text}`);
