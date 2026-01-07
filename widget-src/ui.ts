@@ -18,6 +18,7 @@ export type UiController = {
   mount(): void;
   setOpen(open: boolean): void;
   setState(state: WidgetState): void;
+  setListeningRms(rms: number): void;
   setMode(mode: "voice" | "text"): void;
   setProfile(profile: { displayName: string; avatarUrl: string | null }): void;
   setIntimacy(level: number | null): void;
@@ -262,6 +263,25 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
     .heroStatusDot.thinking { background: rgba(59,130,246,0.85); }
     .heroStatusDot.speaking { background: rgba(109,40,217,0.85); }
     .heroStatusText { letter-spacing: 0.01em; }
+    .listenBars {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 14px;
+      margin-left: 8px;
+      opacity: 0.9;
+    }
+    .listenBars span {
+      width: 3px;
+      height: 12px;
+      background: rgba(17,24,39,0.65);
+      border-radius: 9999px;
+      transform-origin: bottom;
+      transform: scaleY(0.15);
+      transition: transform 60ms linear, opacity 120ms ease;
+      opacity: 0.55;
+    }
+    .heroStatusDot.listening + .heroStatusText .listenBars span { opacity: 0.9; }
     .dots {
       display:inline-flex;
       gap: 3px;
@@ -566,11 +586,15 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
   heroStatusText.className = "heroStatusText";
   const heroStatusLabel = document.createElement("span");
   heroStatusLabel.textContent = "Ready";
+  const listenBars = document.createElement("span");
+  listenBars.className = "listenBars";
+  listenBars.innerHTML = `<span></span><span></span><span></span>`;
   const dots = document.createElement("span");
   dots.className = "dots";
   dots.innerHTML = `<span></span><span></span><span></span>`;
   dots.style.display = "none";
   heroStatusText.appendChild(heroStatusLabel);
+  heroStatusText.appendChild(listenBars);
   heroStatusText.appendChild(dots);
   heroStatusLine.appendChild(heroStatusDot);
   heroStatusLine.appendChild(heroStatusText);
@@ -892,8 +916,21 @@ export function createUi(cb: UiCallbacks, opts?: { layout?: UiLayout }): UiContr
         heroStatusLabel.textContent = txt;
         // dots for thinking/speaking
         dots.style.display = state === "thinking" || state === "speaking" ? "inline-flex" : "none";
+        // listening bars only in listening state
+        listenBars.style.display = state === "listening" ? "inline-flex" : "none";
       };
       voiceUi(s);
+    },
+    setListeningRms(rms) {
+      // Map RMS (roughly 0..0.2) into 0..1 for UI.
+      const lvl = Math.max(0, Math.min(1, (rms - 0.01) / 0.09));
+      const spans = listenBars.querySelectorAll("span");
+      const a = 0.15 + lvl * 0.85;
+      const b = 0.12 + Math.min(1, lvl * 0.95) * 0.88;
+      const c = 0.10 + Math.min(1, lvl * 0.75) * 0.80;
+      (spans[0] as HTMLElement | undefined)?.style.setProperty("transform", `scaleY(${a.toFixed(3)})`);
+      (spans[1] as HTMLElement | undefined)?.style.setProperty("transform", `scaleY(${b.toFixed(3)})`);
+      (spans[2] as HTMLElement | undefined)?.style.setProperty("transform", `scaleY(${c.toFixed(3)})`);
     },
     setMode(mode) {
       currentMode = mode;

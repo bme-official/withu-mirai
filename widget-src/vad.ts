@@ -142,8 +142,10 @@ export function createVad(stream: MediaStream, recorder: RecorderLike, cb: VadCa
       const silenceMs = t - st.lastVoiceAt;
       if (speechMs >= VAD_CONFIG.maxSpeechMs) {
         void endSpeech("max");
-      } else if (silenceMs >= VAD_CONFIG.silenceMs) {
-        void endSpeech("silence");
+      } else {
+        // Be extra cautious early in an utterance: short pauses ("one breath") are common.
+        const requiredSilenceMs = speechMs < 1800 ? Math.max(VAD_CONFIG.silenceMs, 1100) : VAD_CONFIG.silenceMs;
+        if (silenceMs >= requiredSilenceMs) void endSpeech("silence");
       }
     }
 

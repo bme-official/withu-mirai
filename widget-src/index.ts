@@ -118,6 +118,9 @@ async function main() {
   let currentAudio: HTMLAudioElement | null = null;
   let currentAudioStop: (() => void) | null = null;
   let pendingListenAfterSpeak = false;
+  let ttsCache: Map<string, Blob> | null = null;
+  let ttsInflight: Map<string, Promise<Blob>> | null = null;
+  let ttsCacheOrder: string[] | null = null;
   let gotUserGesture = false;
   let bootGreetingText: string | null = null;
   let bootGreetingDisplayed = false;
@@ -148,7 +151,30 @@ async function main() {
     if (speakerMuted) return null;
     try {
       const t0 = performance.now();
-      const blob = await api.ttsAudio(text);
+      // Small in-memory cache to avoid re-generating identical audio (e.g., repeated greetings).
+      // Key is text only (siteId/provider are handled server-side); good enough for UX.
+      const key = text.trim();
+      if (!ttsCacheOrder) ttsCacheOrder = [];
+      if (!ttsCache) ttsCache = new Map();
+      if (!ttsInflight) ttsInflight = new Map();
+      let blob = ttsCache.get(key) || null;
+      if (!blob) {
+        const existing = ttsInflight.get(key) || null;
+        if (existing) {
+          blob = await existing;
+        } else {
+          const p = api.ttsAudio(text).finally(() => ttsInflight?.delete(key));
+          ttsInflight.set(key, p);
+          blob = await p;
+        }
+        // cap cache size
+        ttsCache.set(key, blob);
+        ttsCacheOrder.push(key);
+        while (ttsCacheOrder.length > 20) {
+          const k = ttsCacheOrder.shift();
+          if (k) ttsCache.delete(k);
+        }
+      }
       const url = URL.createObjectURL(blob);
       try {
         const audio = new Audio(url);
@@ -287,6 +313,10 @@ async function main() {
     vad = createVad(stream, recorder, {
       onSpeechStart() {
         void api.log("vad_speech_start");
+      },
+      onDebug({ rms }) {
+        // Visualize mic input so users know we are hearing them.
+        if (state === "listening") ui.setListeningRms(rms);
       },
       async onSpeechEnd({ durationMs, sizeBytes, blob }) {
         if (mode !== "voice") return;

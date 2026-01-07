@@ -12,6 +12,14 @@ import { getServerEnv } from "@/lib/server/env";
 
 type OpenAiTtsModel = "tts-1" | "tts-1-hd";
 
+function pickElevenVoiceSettings(prof: any): any {
+  const cfg = prof?.chat_config;
+  const vs = cfg?.tts?.elevenlabs?.voice_settings;
+  if (vs && typeof vs === "object") return vs;
+  // Default tuned for natural, softer delivery (good for Japanese voices).
+  return { stability: 0.3, similarity_boost: 0.85, style: 0.45, use_speaker_boost: true };
+}
+
 export async function POST(req: NextRequest) {
   const ip = getClientIp(req);
   const cors = corsHeaders(req);
@@ -45,7 +53,9 @@ export async function POST(req: NextRequest) {
       if (!apiKey) throw new Error("missing_ELEVENLABS_API_KEY");
       if (!voiceId) throw new Error("missing_eleven_voice_id");
 
-      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
+      // optimize_streaming_latency improves time-to-first-audio
+      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?optimize_streaming_latency=2`;
+      const voice_settings = pickElevenVoiceSettings(prof as any);
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -56,12 +66,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({
           text: input,
           model_id: modelId || undefined,
-          voice_settings: {
-            stability: 0.4,
-            similarity_boost: 0.8,
-            style: 0.2,
-            use_speaker_boost: true,
-          },
+          voice_settings,
         }),
       });
       if (!res.ok) {
