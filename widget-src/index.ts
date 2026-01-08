@@ -122,12 +122,46 @@ async function main() {
   let ttsInflight: Map<string, Promise<Blob>> | null = null;
   let ttsCacheOrder: string[] | null = null;
   let gotUserGesture = false;
+  let audioUnlocked = false;
+  let lastAudioHintAt = 0;
   let bootGreetingText: string | null = null;
   let bootGreetingDisplayed = false;
   let bootGreetingSpoken = false;
   let bootGreetingInFlight: Promise<void> | null = null;
   let pendingStopVoiceAfterTurn = false;
   let intimacyLevel: number | null = null;
+
+  async function unlockAudioOnce(reason: string) {
+    if (audioUnlocked) return;
+    try {
+      // This must run in or right after a user gesture to unlock audio playback on iOS Safari.
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      try {
+        if (ctx.state === "suspended") await ctx.resume();
+        const buf = ctx.createBuffer(1, 1, 22050);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start(0);
+        src.stop(0);
+        // tiny delay to ensure the graph starts
+        await new Promise((r) => window.setTimeout(r, 12));
+      } finally {
+        try {
+          await ctx.close();
+        } catch {}
+      }
+      audioUnlocked = true;
+      void api.log("audio_unlocked", { reason });
+    } catch (e) {
+      void api.log("audio_unlock_failed", { reason, message: safeErr(e) });
+    }
+  }
+
+  function shouldRetryTts(err: unknown): boolean {
+    const m = safeErr(err);
+    return /HTTP\s+(429|500|502|503)\b/.test(m) || /rate_limited|timeout/i.test(m);
+  }
 
   function stripEmojis(text: string): string {
     try {
@@ -174,7 +208,18 @@ async function main() {
         if (existing) {
           blob = await existing;
         } else {
-          const p = api.ttsAudio(text).finally(() => ttsInflight?.delete(key));
+          const p = (async () => {
+            try {
+              return await api.ttsAudio(text);
+            } catch (e) {
+              void api.log("tts_fetch_error", { message: safeErr(e) });
+              if (shouldRetryTts(e)) {
+                await new Promise((r) => window.setTimeout(r, 220));
+                return await api.ttsAudio(text);
+              }
+              throw e;
+            }
+          })().finally(() => ttsInflight?.delete(key));
           ttsInflight.set(key, p);
           blob = await p;
         }
@@ -327,11 +372,18 @@ async function main() {
     try {
       const ws = await speakWithWebSpeech(text, ttsVoiceHint);
       void api.log("tts_fallback_webspeech", { ok: Boolean(ws) });
-      return ws;
+      if (ws) return ws;
     } catch (e) {
       void api.log("tts_fallback_webspeech_error", { message: safeErr(e) });
-      return null;
     }
+    // If both fail, show a short hint (do not spam).
+    const now = Date.now();
+    if (now - lastAudioHintAt > 6000) {
+      lastAudioHintAt = now;
+      ui.setError("Audio couldn't play. Tap once to enable audio.");
+      window.setTimeout(() => ui.setError(null), 3500);
+    }
+    return null;
   }
 
   async function ensureVoiceListening(reason: string) {
@@ -591,6 +643,7 @@ async function main() {
     },
     onUserGesture() {
       gotUserGesture = true;
+      void unlockAudioOnce("user_gesture");
       void maybeBootGreet("user_gesture");
     },
     onSelectMode(nextMode) {
@@ -651,6 +704,7 @@ async function main() {
       localStorage.setItem(STORAGE_KEYS.consent, "accepted");
       void api.log("consent_accept");
       ensureConsentUi();
+      void unlockAudioOnce("consent_accept");
       void maybeBootGreet("consent_accept");
     },
     onRejectConsent() {
