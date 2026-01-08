@@ -134,6 +134,27 @@ async function main() {
   async function unlockAudioOnce(reason: string) {
     if (audioUnlocked) return;
     try {
+      // iOS Safari: HTMLMediaElement often needs a user-gesture play() at least once.
+      // Play an almost-silent WAV to unlock media playback.
+      try {
+        const silentWav =
+          "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA==";
+        const a = new Audio(silentWav);
+        a.preload = "auto";
+        a.muted = false;
+        a.volume = 0.0;
+        (a as any).playsInline = true;
+        const p = a.play();
+        if (p && typeof (p as any).catch === "function") {
+          await p;
+        }
+        try {
+          a.pause();
+        } catch {}
+      } catch (e) {
+        void api.log("audio_unlock_media_failed", { reason, message: safeErr(e) });
+      }
+
       // This must run in or right after a user gesture to unlock audio playback on iOS Safari.
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       try {
