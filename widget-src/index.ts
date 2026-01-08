@@ -185,7 +185,7 @@ async function main() {
     return /HTTP\s+(429|500|502|503)\b/.test(m) || /rate_limited|timeout/i.test(m);
   }
 
-  async function playTestBeep(): Promise<boolean> {
+  async function playTestBeep(): Promise<{ ok: true } | { ok: false; err: string }> {
     try {
       // Short beep (WAV) for device audio verification.
       const b64 =
@@ -199,10 +199,11 @@ async function main() {
       a.setAttribute?.("webkit-playsinline", "");
       const p = a.play();
       if (p && typeof (p as any).catch === "function") await p;
-      return true;
+      return { ok: true };
     } catch (e) {
-      void api.log("test_audio_failed", { message: safeErr(e) });
-      return false;
+      const err = safeErr(e);
+      void api.log("test_audio_failed", { message: err });
+      return { ok: false, err };
     }
   }
 
@@ -765,12 +766,20 @@ async function main() {
       } catch {}
       if (!speakerMuted) void maybeBootGreet("speaker_unmute");
     },
-    async onTestAudio() {
+    onTestAudio() {
+      // iOS Safari: keep play() inside the user-gesture call stack (avoid await before play()).
       ui.setError(null);
-      await unlockAudioOnce("test_audio");
-      const ok = await playTestBeep();
-      ui.setError(ok ? "Test sound played." : "Test sound failed. Check iPhone silent mode / Bluetooth.");
-      window.setTimeout(() => ui.setError(null), 2500);
+      void unlockAudioOnce("test_audio");
+      void playTestBeep().then((res) => {
+        if (res.ok) {
+          ui.setError("Test sound played.");
+        } else {
+          // Show the real iOS error (e.g., NotAllowedError) to speed up debugging.
+          const short = res.err.length > 140 ? `${res.err.slice(0, 140)}…` : res.err;
+          ui.setError(`Test sound failed: ${short}`);
+        }
+        window.setTimeout(() => ui.setError(null), 3500);
+      });
     },
     onAcceptConsent() {
       localStorage.setItem(STORAGE_KEYS.consent, "accepted");
