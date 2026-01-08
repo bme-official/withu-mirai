@@ -126,7 +126,6 @@ async function main() {
   let bootGreetingDisplayed = false;
   let bootGreetingSpoken = false;
   let bootGreetingInFlight: Promise<void> | null = null;
-  let voiceTurnActive = false;
   let pendingStopVoiceAfterTurn = false;
   let intimacyLevel: number | null = null;
 
@@ -317,10 +316,7 @@ async function main() {
 
   async function speak(text: string, stream?: { setProgress(ratio: number): void; finish(): void }) {
     // Ensure VAD is never running while speaking (stop first, then proceed).
-    if (speakerMuted) {
-      void api.log("tts_muted", { len: text.length });
-      return null;
-    }
+    if (speakerMuted) void api.log("tts_muted", { len: text.length });
     return await speakWithServerTts(text, stream);
   }
 
@@ -352,7 +348,6 @@ async function main() {
     if (!recorder) recorder = createRecorder(stream);
     vad = createVad(stream, recorder, {
       onSpeechStart() {
-        voiceTurnActive = true;
         void api.log("vad_speech_start");
       },
       onDebug({ rms }) {
@@ -361,7 +356,6 @@ async function main() {
       },
       async onSpeechEnd({ durationMs, sizeBytes, blob }) {
         // Even if user switches to Text mid-utterance, finish the current voice turn.
-        if (!voiceTurnActive) return;
         if (state !== "listening" || inFlight) return;
         setInFlight(true);
 
@@ -414,7 +408,6 @@ async function main() {
 
           setState(reduceState(state, { type: "TTS_END" }));
           setInFlight(false);
-          voiceTurnActive = false;
           // auto continue listening
           setState("idle");
           if (pendingStopVoiceAfterTurn || mode === "text") {
@@ -424,12 +417,10 @@ async function main() {
             void ensureVoiceListening("auto_continue");
           }
         } catch (e) {
-          voiceTurnActive = false;
           stopAll("pipeline", `Something went wrong: ${safeErr(e)}`);
         }
       },
       onError(err) {
-        voiceTurnActive = false;
         stopAll("vad", `VAD error: ${err.message}`);
       },
     });
@@ -586,7 +577,7 @@ async function main() {
       ui.setError(null);
       if (mode === "text") {
         // If we're mid voice turn (recording/ASR/LLM/TTS), don't drop it. Stop after turn completes.
-        if (voiceTurnActive || state === "listening" || inFlight || recorder?.isRecording?.()) {
+        if (state === "listening" || inFlight || recorder?.isRecording?.()) {
           pendingStopVoiceAfterTurn = true;
           return;
         }
